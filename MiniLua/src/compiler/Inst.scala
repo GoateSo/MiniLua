@@ -1,0 +1,37 @@
+package compiler
+
+/**
+ * datatypes to encode lua instructions
+ */
+enum Inst(code: Int):
+  case MOVE(a: Int, b: Int)             extends Inst(0)
+  case LOADK(a: Int, bx: Int)           extends Inst(1)
+  case GETUPVAL(a: Int, b: Int)         extends Inst(4)
+  case GETGLOBAL(a: Int, bx: Int)       extends Inst(5)
+  case GETTABLE(a: Int, b: Int, c: Int) extends Inst(6)
+  case SETGLOBAL(a: Int, bx: Int)       extends Inst(7)
+  case SETUPVAL(a: Int, b: Int)         extends Inst(8)
+  case SETTABLE(a: Int, b: Int, c: Int) extends Inst(9)
+  case NEWTABLE(a: Int, b: Int, c: Int) extends Inst(10)
+  case ADD(a: Int, b: Int, c: Int)      extends Inst(12)
+  case SUB(a: Int, b: Int, c: Int)      extends Inst(13)
+  case MUL(a: Int, b: Int, c: Int)      extends Inst(14)
+  case DIV(a: Int, b: Int, c: Int)      extends Inst(15)
+  case MOD(a: Int, b: Int, c: Int)      extends Inst(16)
+  case POW(a: Int, b: Int, c: Int)      extends Inst(17)
+  case UNM(a: Int, b: Int)              extends Inst(18)
+  case NOT(a: Int, b: Int)              extends Inst(19)
+  case LEN(a: Int, b: Int)              extends Inst(20)
+  case CONCAT(a: Int, b: Int, c: Int)   extends Inst(21)
+  case JMP(sBx: Int)                    extends Inst(22)
+  case EQ(a: Int, b: Int, c: Int)       extends Inst(23)
+  case LT(a: Int, b: Int, c: Int)       extends Inst(24)
+  case LE(a: Int, b: Int, c: Int)       extends Inst(25)
+  case TEST(a: Int, c: Int)             extends Inst(26)
+  case TESTSET(a: Int, b: Int, c: Int)  extends Inst(27)
+  case CALL(a: Int, b: Int)             extends Inst(28)
+  case RETURN(a: Int)                   extends Inst(30)
+  case FORLOOP(a: Int, sBx: Int)        extends Inst(31)
+  case FORPREP(a: Int, sBx: Int)        extends Inst(32)
+  case CLOSE(a: Int)                    extends Inst(35)
+  case CLOSURE(a: Int, bx: Int)         extends Inst(36)

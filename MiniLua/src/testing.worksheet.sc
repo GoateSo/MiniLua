@@ -15,6 +15,9 @@ val e2 = """
 |for i = 1, 10 do
 |  print(i)
 |end 
+|while true do
+|   print("a")
+|end
 |if true then 
 | print("a") 
 |elseif false then 
@@ -28,9 +31,9 @@ val e2 = """
 val p = Parser.program(Tokenizer.tokenize(e2))
 println(Parseutil.asString(p))
 
-val p2 = Parser.program(Tokenizer.tokenize("""
-|local xs = {{1,2},{2,4}}
-|local y = xs[1*1*1/2][2]
-|""".stripMargin))
+val p2 = Parser.program(Tokenizer.tokenize("""|local xs = {{1,2},{2,4}}
+                                              |local y = xs[1*1*1/2][2]
+                                              |""".stripMargin))
 
 Parseutil.asString(p2)
+Parseutil.asString(p)

@@ -80,7 +80,7 @@ enum TreeNode:
       cond: TreeNode,
       body: TreeNode,
       elifs: List[(TreeNode, TreeNode)], // elseif blocks (possibly empty)
-      elseBody: Option[TreeNode] // else block
+      elseBody: Option[TreeNode]         // else block
   )
   case Chunk(stmts: List[TreeNode])
   case LNum(value: Double)
@@ -212,12 +212,12 @@ object Parser:
         rmap(UnOp(op, _))(unop(next))
       case _ => power(cur)
   // ops w/ same precedence as multiplication
-  val mult = repSep(unop, Set("*", "/", "%"))
-  val add = repSep(mult, Set("+", "-"))
+  val mult   = repSep(unop, Set("*", "/", "%"))
+  val add    = repSep(mult, Set("+", "-"))
   val concat = repSep(add, Set(".."))
-  val comp = repSep(concat, Set("<", "<=", ">", ">=", "~=", "=="))
-  val and = repSep(comp, Set("and"))
-  val expr = repSep(and, Set("or")) // lowest precedence - general expr
+  val comp   = repSep(concat, Set("<", "<=", ">", ">=", "~=", "=="))
+  val and    = repSep(comp, Set("and"))
+  val expr   = repSep(and, Set("or")) // lowest precedence - general expr
 
   // parse seperated list, expect that opening sym already consumed
   def sepList(
@@ -265,7 +265,7 @@ object Parser:
   def chunk(cur: List[Token]): ParseResult =
     val (stmts, rest) = stmtList(cur)
     println(
-      s"${summon[sourcecode.Line]}: stmts: ${stmts} | rest: ${rest}"
+      s"${summon[sourcecode.Line]}: stmts: $stmts | rest: $rest"
     )
     lastStat(rest) match
       case (Some(node), rest2) => (Some(Chunk(stmts :+ node)), rest2)
@@ -300,7 +300,7 @@ object Parser:
           case (Some(body), rem) =>
             expect(rem, _ == KW("end"), s"expected `end` after function at $l")
             (body, rem.tail)
-          case (None, _) => err(s"expected body for function `${name}` ($l)")
+          case (None, _) => err(s"expected body for function `$name` ($l)")
         (Some(FunDef(name, argList, body)), rem)
       case _ => err(s"expected `local function <name>` at ${cur.head.l}}")
 

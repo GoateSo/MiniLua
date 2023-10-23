@@ -1,12 +1,12 @@
 package compiler
 
 enum TokenType(val content: String, val tag: String):
-  case KW(x: String) extends TokenType(x, "keyword")
-  case ID(x: String) extends TokenType(x, "identifier")
+  case KW(x: String)  extends TokenType(x, "keyword")
+  case ID(x: String)  extends TokenType(x, "identifier")
   case NUM(x: String) extends TokenType(x, "number")
   case STR(x: String) extends TokenType(x, "string")
-  case SP(x: String) extends TokenType(x, "special")
-  case Eof extends TokenType("<eof>", "<eof>")
+  case SP(x: String)  extends TokenType(x, "special")
+  case Eof            extends TokenType("<eof>", "<eof>")
 
   override def toString(): String = s"$content"
 
@@ -71,24 +71,8 @@ object Tokenizer:
       else (asState(c), s"$c", cval)
 
   val Keywords = Set[String](
-    "and",
-    "or",
-    "not",
-    "if",
-    "then",
-    "else",
-    "elseif",
-    "end",
-    "while",
-    "do",
-    "repeat",
-    "until",
-    "for",
-    "in",
-    "break",
-    "function",
-    "local",
-    "return"
+    "and", "or", "not", "if", "then", "else", "elseif", "end", "while", "do",
+    "repeat", "until", "for", "in", "break", "function", "local", "return"
   )
 
   private def mkTok(

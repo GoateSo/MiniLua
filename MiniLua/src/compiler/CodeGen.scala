@@ -1,28 +1,32 @@
 package compiler
 
-import Instruction.*
+import Inst.*
 import TreeNode.*
+import compiler.Parser.err
 
-case class Chunk(
-    instructions: List[Instruction],
+// Proto data type to store instructions and relevant info
+// also functions as a sort of "state" for the codegen process
+// abstract representation of function prototypes
+case class Proto(
+    instructions: List[Inst],
     constTable: Map[Double, Int],
     symTable: Map[String, Int],
     upvalTable: Map[String, Int],
-    fnTable: List[Chunk],
+    fnTable: List[Proto],
     paramCnt: Int,
-    parent: Chunk = null
+    parent: Proto = null
 ):
   // helper functions
-  def addInstructions(is: Instruction*): Chunk =
+  def addInstructions(is: Inst*): Proto =
     this.copy(instructions = instructions ++ is)
-  def addFn(fn: Chunk): Chunk =
+  def addFn(fn: Proto): Proto =
     this.copy(fnTable = fnTable :+ fn)
-  def addSymbol(name: String, ind: Int): Chunk =
-    assert(symTable.size < 0x100, ">= 256 locals in function")
+  def addSymbol(name: String, ind: Int): Proto =
+    assert(symTable.size < 256, ">= 256 locals in function")
     this.copy(symTable = symTable + (name -> ind))
-  def addUpval(name: String, ind: Int): Chunk =
+  def addUpval(name: String, ind: Int): Proto =
     this.copy(upvalTable = upvalTable + (name -> ind))
-  def setParent(p: Chunk): Chunk =
+  def setParent(p: Proto): Proto =
     this.copy(parent = p)
 
 private object UFlag:
@@ -31,38 +35,53 @@ private object UFlag:
   val UPVAL: UpvalFlag = true
 import UFlag.*
 
+val ops = Map[String, (Int, Int, Int) => Inst](
+  "+"   -> ADD.apply,
+  "-"   -> SUB.apply,
+  "*"   -> MUL.apply,
+  "/"   -> DIV.apply,
+  "%"   -> MOD.apply,
+  "^"   -> POW.apply,
+  ".."  -> CONCAT.apply,
+  "=="  -> EQ.apply,
+  "<"   -> LT.apply,
+  "<="  -> LE.apply,
+  "and" -> TESTSET.apply,
+  "or"  -> TESTSET.apply
+)
+
 object CodeGen:
-  private inline def getConst(st: Chunk, value: Double): (Int, Chunk) =
+  private inline def getConst(st: Proto, value: Double): (Int, Proto) =
     val consts = st.constTable
     if consts.contains(value) then (consts(value), st)
     else
       val nInd = consts.size + 0x100
       (nInd, st.copy(constTable = consts + (value -> nInd)))
 
-  private inline def findUpval(name: String, parent: Chunk): (UpvalFlag, Int) =
-    if parent == null then (UPVAL, -1)
+  // finds the upvalue in the parent prototype, checking whether its local to that prototype or its an upval in the parent also
+  private inline def findUpval(name: String, par: Proto): (UpvalFlag, Int) =
+    if par == null then (UPVAL, -1)
     // in parent symbol table: return that it's local, and that it's a local in the parent
-    else if parent.symTable.contains(name) then (LOCAL, parent.symTable(name))
-    else if parent.upvalTable.contains(name)
-    then // otherwise: check parent upvalue table
-      (UPVAL, parent.upvalTable(name))
-    else // non-present, add instead. TODO: check whether this works. as it stands, this MUST be coupled with an addUpval call in the parent
-      (UPVAL, parent.upvalTable.size)
+    else if par.symTable.contains(name) then (LOCAL, par.symTable(name))
+    // otherwise: check parent upvalue table
+    else if par.upvalTable.contains(name) then (UPVAL, par.upvalTable(name))
+    // non-present, add instead. TODO: check whether this works. as it stands, this MUST be coupled with an addUpval call in the parent
+    else (UPVAL, par.upvalTable.size)
 
-  private inline def getSym(st: Chunk, name: String): (Int, Chunk, UpvalFlag) =
+  private inline def getSym(st: Proto, name: String): (Int, Proto, UpvalFlag) =
     if st.symTable.contains(name) then (st.symTable(name), st, LOCAL)
     else if st.upvalTable.contains(name) then (st.upvalTable(name), st, UPVAL)
     else
-      val nInd = st.upvalTable.size
-      val parent = st.parent
+      val nInd            = st.upvalTable.size
+      val parent          = st.parent
       val (level, symind) = findUpval(name, parent)
       (nInd, st.addUpval(name, nInd), UPVAL)
 
   private inline def loadValue(
       tree: TreeNode,
       register: Int,
-      st: Chunk
-  ): Chunk =
+      st: Proto
+  ): Proto =
     tree match
       case LNum(n) =>
         val (constInd, st2) = getConst(st, n)
@@ -76,11 +95,11 @@ object CodeGen:
       case _ => processExpr(tree, st, register)
 
   // returns: new state, instructions, operand value (const/reg index), register
-  private inline def procssOp(
+  private inline def processOp(
       tree: TreeNode,
-      state: Chunk,
+      state: Proto,
       register: Int
-  ): (Chunk, Int, Int) = tree match
+  ): (Proto, Int, Int) = tree match
     case LNum(value) =>
       val (constInd, st2) = getConst(state, value)
       (st2, constInd, register)
@@ -100,9 +119,9 @@ object CodeGen:
   private inline def processFunCall(
       name: String,
       args: List[TreeNode],
-      state: Chunk,
+      state: Proto,
       regA: Int
-  ): Chunk =
+  ): Proto =
     // get register holding function prototype index
     val init = loadValue(Id(name), regA, state)
     // process the arguments: fold w/ state, instruction list, and current register
@@ -112,50 +131,49 @@ object CodeGen:
 
   def processExpr(
       tree: TreeNode,
-      state: Chunk,
+      state: Proto,
       register: Int
-  ): Chunk =
+  ): Proto =
     tree match
       case BinOp(op, left, right) => // process L and R ops
-        val (st2, op1, reg1) = procssOp(left, state, register)
-        val (st3, op2, _) = procssOp(right, st2, reg1)
+        // process LHS
+        val (st2, op1, reg1) = processOp(left, state, register)
         // generate the instruction
-        st3.addInstructions:
-          op match
-            case "+"  => ADD(register, op1, op2)
-            case "-"  => SUB(register, op1, op2)
-            case "*"  => MUL(register, op1, op2)
-            case "/"  => DIV(register, op1, op2)
-            case "%"  => MOD(register, op1, op2)
-            case "^"  => POW(register, op1, op2)
-            case ".." => CONCAT(register, op1, op2)
-            case _ =>
-              throw Exception(
-                s"invalid binary operator ${op} in expression ${tree}"
-              )
+        op match
+          // arith operators: process RHS and add instruction on end
+          case "+" | "-" | "*" | "/" | "%" | "^" | ".." =>
+            val (st3, op2, _) = processOp(right, st2, reg1)
+            st3.addInstructions(ops(op)(register, op1, op2))
+          // comparison: evalute RHS and then do a comparison + jmp
+          case "~=" | "==" | "<" | ">" | "<=" | ">=" =>
+            val (st3, op2, _) = processOp(right, st2, reg1)
+            ???
+          // logical operators: delay evaluation of RHS until after testing LHS
+          // and: jump to end if LHS is false, otherwise evaluate RHS
+          // or: jump to end if LHS is true, otherwise evaluate RHS
+          case "and" | "or" => ???
+          // case
+          case _ => err(s"invalid binary operator $op in expression $tree")
 
       case UnOp(op, right) =>
-        val (st2, op1, _) = procssOp(right, state, register)
+        val (st2, op1, _) = processOp(right, state, register)
         st2.addInstructions:
           op match
             case "-"   => UNM(register, op1)
             case "not" => NOT(register, op1)
-            case _ =>
-              throw Exception(
-                s"invalid unary operator ${op} in expression ${tree}"
-              )
+            case _     => err(s"invalid unary operator $op in expression $tree")
       case FunCall(name, args) => processFunCall(name, args, state, register)
       case LNum(x)             => loadValue(tree, register, state)
       case Id(name)            => loadValue(tree, register, state)
-      case _                   => throw Exception(s"invalid expression ${tree}")
+      case _                   => throw Exception(s"invalid expression $tree")
 
   // produce a list of psuedo-instructions (move/getupval) that indicate where the function's nth
   // upvalue is located, either as MOVE 0 X or GETUPVAL 0 X depending on whether it's local to the parent
-  private inline def psuedoInstrs(fn: Chunk): List[Instruction] =
+  private inline def psuedoInstrs(fn: Proto): List[Inst] =
     val list = fn.upvalTable.foldLeft(IndexedSeq.fill(fn.upvalTable.size)("")) {
       case (acc, (name, ind)) => acc.updated(ind, name)
     }
-    list.foldRight(List[Instruction]()): (name, acc) =>
+    list.foldRight(List[Inst]()): (name, acc) =>
       val (flag, ind) = findUpval(name, fn.parent)
       flag match
         case UPVAL => GETUPVAL(0, ind) :: acc
