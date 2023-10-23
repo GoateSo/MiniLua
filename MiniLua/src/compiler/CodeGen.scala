@@ -3,6 +3,7 @@ package compiler
 import Inst.*
 import TreeNode.*
 import compiler.Parser.err
+import compiler.Parser.comp
 
 // Proto data type to store instructions and relevant info
 // also functions as a sort of "state" for the codegen process
@@ -36,18 +37,22 @@ private object UFlag:
 import UFlag.*
 
 val ops = Map[String, (Int, Int, Int) => Inst](
-  "+"   -> ADD.apply,
-  "-"   -> SUB.apply,
-  "*"   -> MUL.apply,
-  "/"   -> DIV.apply,
-  "%"   -> MOD.apply,
-  "^"   -> POW.apply,
-  ".."  -> CONCAT.apply,
-  "=="  -> EQ.apply,
-  "<"   -> LT.apply,
-  "<="  -> LE.apply,
-  "and" -> TESTSET.apply,
-  "or"  -> TESTSET.apply
+  "+"  -> ADD.apply,
+  "-"  -> SUB.apply,
+  "*"  -> MUL.apply,
+  "/"  -> DIV.apply,
+  "%"  -> MOD.apply,
+  "^"  -> POW.apply,
+  ".." -> CONCAT.apply
+)
+
+val compares = Map(
+  "~=" -> EQ.apply,
+  "==" -> EQ.apply,
+  "<"  -> LT.apply,
+  ">"  -> LT.apply,
+  "<=" -> LE.apply,
+  ">=" -> LE.apply
 )
 
 object CodeGen:
@@ -145,13 +150,23 @@ object CodeGen:
             val (st3, op2, _) = processOp(right, st2, reg1)
             st3.addInstructions(ops(op)(register, op1, op2))
           // comparison: evalute RHS and then do a comparison + jmp
+          // TODO: note: use seperate implementation when it's in a if statement's condition
           case "~=" | "==" | "<" | ">" | "<=" | ">=" =>
             val (st3, op2, _) = processOp(right, st2, reg1)
-            ???
+            val flag = op match
+              case "==" | "<" | "<=" => 1
+              case _                 => 0
+            st3.addInstructions(
+              compares(op)(flag, op1, op2), // cmp and jump to load false
+              JMP(1),                       // jump to load true instr
+              LOADBOOL(register, 0, 1),     // load false and skip 1
+              LOADBOOL(register, 1, 0)      // load true
+            )
           // logical operators: delay evaluation of RHS until after testing LHS
           // and: jump to end if LHS is false, otherwise evaluate RHS
           // or: jump to end if LHS is true, otherwise evaluate RHS
-          case "and" | "or" => ???
+          case "and" | "or" =>
+            ???
           // case
           case _ => err(s"invalid binary operator $op in expression $tree")
 
