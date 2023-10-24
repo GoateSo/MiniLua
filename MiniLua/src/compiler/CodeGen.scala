@@ -142,17 +142,19 @@ object CodeGen:
     tree match
       case BinOp(op, left, right) => // process L and R ops
         // process LHS
-        val (st2, op1, reg1) = processOp(left, state, register)
+        // val (st2, op1, reg1) = processOp(left, state, register)
         // generate the instruction
         op match
           // arith operators: process RHS and add instruction on end
           case "+" | "-" | "*" | "/" | "%" | "^" | ".." =>
-            val (st3, op2, _) = processOp(right, st2, reg1)
+            val (st2, op1, reg1) = processOp(left, state, register)
+            val (st3, op2, _)    = processOp(right, st2, reg1)
             st3.addInstructions(ops(op)(register, op1, op2))
           // comparison: evalute RHS and then do a comparison + jmp
           // TODO: note: use seperate implementation when it's in a if statement's condition
           case "~=" | "==" | "<" | ">" | "<=" | ">=" =>
-            val (st3, op2, _) = processOp(right, st2, reg1)
+            val (st2, op1, reg1) = processOp(left, state, register)
+            val (st3, op2, _)    = processOp(right, st2, reg1)
             val flag = op match
               case "==" | "<" | "<=" => 1
               case _                 => 0
@@ -166,6 +168,10 @@ object CodeGen:
           // and: jump to end if LHS is false, otherwise evaluate RHS
           // or: jump to end if LHS is true, otherwise evaluate RHS
           case "and" | "or" =>
+            // TODO:
+            // 1. minimize sub-trees of same op (a and b and c -> and_all(a, b, c))
+            // 2. figure out jmp distances
+            // 3. join w/ jmp instructions as seperators
             ???
           // case
           case _ => err(s"invalid binary operator $op in expression $tree")
