@@ -7,6 +7,7 @@ enum Inst(code: Int):
   case MOVE(a: Int, b: Int)             extends Inst(0)
   case LOADK(a: Int, bx: Int)           extends Inst(1)
   case LOADBOOL(a: Int, b: Int, c: Int) extends Inst(2)
+  case LOADNIL(a: Int, b: Int)          extends Inst(3)
   case GETUPVAL(a: Int, b: Int)         extends Inst(4)
   case GETGLOBAL(a: Int, bx: Int)       extends Inst(5)
   case GETTABLE(a: Int, b: Int, c: Int) extends Inst(6)

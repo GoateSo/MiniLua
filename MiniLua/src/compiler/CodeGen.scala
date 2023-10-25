@@ -4,56 +4,14 @@ import Inst.*
 import TreeNode.*
 import compiler.Parser.err
 import compiler.Parser.comp
-
-// Proto data type to store instructions and relevant info
-// also functions as a sort of "state" for the codegen process
-// abstract representation of function prototypes
-case class Proto(
-    instructions: List[Inst],
-    constTable: Map[Double, Int],
-    symTable: Map[String, Int],
-    upvalTable: Map[String, Int],
-    fnTable: List[Proto],
-    paramCnt: Int,
-    parent: Proto = null
-):
-  // helper functions
-  def addInstructions(is: Inst*): Proto =
-    this.copy(instructions = instructions ++ is)
-  def addFn(fn: Proto): Proto =
-    this.copy(fnTable = fnTable :+ fn)
-  def addSymbol(name: String, ind: Int): Proto =
-    assert(symTable.size < 256, ">= 256 locals in function")
-    this.copy(symTable = symTable + (name -> ind))
-  def addUpval(name: String, ind: Int): Proto =
-    this.copy(upvalTable = upvalTable + (name -> ind))
-  def setParent(p: Proto): Proto =
-    this.copy(parent = p)
+import utils.GenUtils
+import utils.Parseutil
 
 private object UFlag:
   opaque type UpvalFlag = Boolean
   val LOCAL: UpvalFlag = false
   val UPVAL: UpvalFlag = true
 import UFlag.*
-
-val ops = Map[String, (Int, Int, Int) => Inst](
-  "+"  -> ADD.apply,
-  "-"  -> SUB.apply,
-  "*"  -> MUL.apply,
-  "/"  -> DIV.apply,
-  "%"  -> MOD.apply,
-  "^"  -> POW.apply,
-  ".." -> CONCAT.apply
-)
-
-val compares = Map(
-  "~=" -> EQ.apply,
-  "==" -> EQ.apply,
-  "<"  -> LT.apply,
-  ">"  -> LT.apply,
-  "<=" -> LE.apply,
-  ">=" -> LE.apply
-)
 
 object CodeGen:
   private inline def getConst(st: Proto, value: Double): (Int, Proto) =
@@ -76,11 +34,17 @@ object CodeGen:
   private inline def getSym(st: Proto, name: String): (Int, Proto, UpvalFlag) =
     if st.symTable.contains(name) then (st.symTable(name), st, LOCAL)
     else if st.upvalTable.contains(name) then (st.upvalTable(name), st, UPVAL)
-    else
+    else // TODO: fix this dumb code
       val nInd            = st.upvalTable.size
       val parent          = st.parent
       val (level, symind) = findUpval(name, parent)
       (nInd, st.addUpval(name, nInd), UPVAL)
+
+  def flattenOp(op: String, root: TreeNode): List[TreeNode] =
+    root match
+      case BinOp(op2, left, right) if op == op2 =>
+        flattenOp(op, left) ++ flattenOp(op, right)
+      case _ => List(root)
 
   private inline def loadValue(
       tree: TreeNode,
@@ -103,24 +67,21 @@ object CodeGen:
   private inline def processOp(
       tree: TreeNode,
       state: Proto,
-      register: Int
+      reg: Int
   ): (Proto, Int, Int) = tree match
     case LNum(value) =>
       val (constInd, st2) = getConst(state, value)
-      (st2, constInd, register)
+      (st2, constInd, reg)
     case Id(name) =>
       val (symInd, st2, flag) = getSym(state, name)
       flag match // if upvalue, prefix w/ getupval, otherwise dierectly use index
-        case LOCAL => (st2, symInd, register)
+        case LOCAL => (st2, symInd, reg)
         case UPVAL =>
-          (
-            st2.addInstructions(GETUPVAL(register, symInd)),
-            register,
-            register + 1
-          )
+          (st2.addInstructions(GETUPVAL(reg, symInd)), reg, reg + 1)
     case _ => // arbitrary expression
-      (processExpr(tree, state, register), register, register + 1)
+      (processExpr(tree, state, reg), reg, reg + 1)
 
+  // processes a function call (name and args) into a list of instructions
   private inline def processFunCall(
       name: String,
       args: List[TreeNode],
@@ -134,59 +95,86 @@ object CodeGen:
       case ((st, reg), arg) => (processExpr(arg, st, reg), reg + 1)
     nst.addInstructions(CALL(regA, args.size + 1)) // call instruction
 
+  /**
+   * parses an expression tree into a list of instructions in a given context
+   */
   def processExpr(
       tree: TreeNode,
       state: Proto,
       register: Int
   ): Proto =
     tree match
-      case BinOp(op, left, right) => // process L and R ops
-        // process LHS
-        // val (st2, op1, reg1) = processOp(left, state, register)
-        // generate the instruction
-        op match
-          // arith operators: process RHS and add instruction on end
-          case "+" | "-" | "*" | "/" | "%" | "^" | ".." =>
-            val (st2, op1, reg1) = processOp(left, state, register)
-            val (st3, op2, _)    = processOp(right, st2, reg1)
-            st3.addInstructions(ops(op)(register, op1, op2))
-          // comparison: evalute RHS and then do a comparison + jmp
-          // TODO: note: use seperate implementation when it's in a if statement's condition
-          case "~=" | "==" | "<" | ">" | "<=" | ">=" =>
-            val (st2, op1, reg1) = processOp(left, state, register)
-            val (st3, op2, _)    = processOp(right, st2, reg1)
-            val flag = op match
-              case "==" | "<" | "<=" => 1
-              case _                 => 0
-            st3.addInstructions(
-              compares(op)(flag, op1, op2), // cmp and jump to load false
-              JMP(1),                       // jump to load true instr
-              LOADBOOL(register, 0, 1),     // load false and skip 1
-              LOADBOOL(register, 1, 0)      // load true
-            )
-          // logical operators: delay evaluation of RHS until after testing LHS
-          // and: jump to end if LHS is false, otherwise evaluate RHS
-          // or: jump to end if LHS is true, otherwise evaluate RHS
-          case "and" | "or" =>
-            // TODO:
-            // 1. minimize sub-trees of same op (a and b and c -> and_all(a, b, c))
-            // 2. figure out jmp distances
-            // 3. join w/ jmp instructions as seperators
-            ???
-          // case
-          case _ => err(s"invalid binary operator $op in expression $tree")
-
+      case FunCall(name, args) => processFunCall(name, args, state, register)
+      case LNum(x)             => loadValue(tree, register, state)
+      case Id(name)            => loadValue(tree, register, state)
       case UnOp(op, right) =>
         val (st2, op1, _) = processOp(right, state, register)
         st2.addInstructions:
           op match
             case "-"   => UNM(register, op1)
             case "not" => NOT(register, op1)
-            case _     => err(s"invalid unary operator $op in expression $tree")
-      case FunCall(name, args) => processFunCall(name, args, state, register)
-      case LNum(x)             => loadValue(tree, register, state)
-      case Id(name)            => loadValue(tree, register, state)
-      case _                   => throw Exception(s"invalid expression $tree")
+            case _ =>
+              err(
+                s"invalid unary operator $op in expression ${Parseutil.asString(tree)}"
+              )
+      case BinOp(op, left, right) =>
+        op match
+          // arith operators: process RHS and add instruction on end
+          case "+" | "-" | "*" | "/" | "%" | "^" | ".." =>
+            val (st2, op1, reg1) = processOp(left, state, register)
+            val (st3, op2, _)    = processOp(right, st2, reg1)
+            st3.addInstructions(GenUtils.ops(op)(register, op1, op2))
+          // comparison: evalute RHS and then do a comparison + jmp
+          // TODO: note: use seperate implementation when it's in a if statement's condition
+          case "~=" | "==" | "<" | ">" | "<=" | ">=" =>
+            val (st2, op1, reg1) = processOp(left, state, register)
+            val (st3, op2, _)    = processOp(right, st2, reg1)
+            val flag = op match // negation flags (e.g. eq vs neq)
+              case "==" | "<" | "<=" => 1
+              case _                 => 0
+            st3.addInstructions(
+              GenUtils
+                .compares(op)(flag, op1, op2), // cmp and jump to load false
+              JMP(1),                          // jump to load true instr
+              LOADBOOL(register, 0, 1),        // load false and skip 1
+              LOADBOOL(register, 1, 0)         // load true
+            )
+          // logical operators: delay evaluation of RHS until after testing LHS
+          case "and" | "or" =>
+            // 1. minimize sub-trees of same op (a and b and c -> and_all(a, b, c))
+            val opList = flattenOp(op, tree) match
+              // 2. join w/ jmp instructions as seperators
+              case rest :+ last =>
+                // process all but last subexpression, w/ special rules adding Test/Testset; add jmp(-1) at end of each instr
+                val flag = if op == "and" then 0 else 1
+                val res = rest.foldLeft(state):
+                  case (st, sub) =>
+                    sub match
+                      case Id(name) if st.hasLocal(name) =>
+                        st.addInstructions(
+                          TESTSET(register, st.symTable(name), flag),
+                          JMP(-1)
+                        )
+                      case _ => // arbitrary expression, process and add test
+                        // TODO: figure out case for mixture of "and"s and "or"s
+                        processExpr(sub, st, register).addInstructions(
+                          TEST(register, flag),
+                          JMP(-1)
+                        )
+                // process last subexpression as normal
+                processExpr(last, res, register)
+              case _ => err("impossible case")
+            // 3. figure out jmp distances and replace placeholders
+            val len = opList.instructions.size
+            opList
+              .copy: // copy and replace instructions with correct jmp distances
+                opList.instructions.zipWithIndex.collect:
+                  case (JMP(-1), i) => JMP(len - i - 1)
+                  case (other, i)   => other
+
+          case _ => err(s"invalid binary operator $op in expression $tree")
+      // TODO: add other cases
+      case _ => throw Exception(s"invalid expression $tree")
 
   // produce a list of psuedo-instructions (move/getupval) that indicate where the function's nth
   // upvalue is located, either as MOVE 0 X or GETUPVAL 0 X depending on whether it's local to the parent
@@ -199,5 +187,66 @@ object CodeGen:
       flag match
         case UPVAL => GETUPVAL(0, ind) :: acc
         case LOCAL => MOVE(0, ind) :: acc
+
+  private inline def varAssign(
+      name: String,
+      defn: TreeNode,
+      register: Int,
+      st: Proto
+  ): Proto =
+    // translate the definition and add to symbol table
+    loadValue(defn, register, st).addSymbol(name, register)
+
+  def processStmt(
+      state: Proto,
+      tree: TreeNode
+  ): Proto = tree match
+    case VarDef(name, value) =>
+      varAssign(name, value, state.symTable.size, state)
+    case VarMut(name, value) =>
+      varAssign(name, value, state.symTable(name), state)
+    case FunCall(name, args) =>
+      processFunCall(name, args, state, state.symTable.size)
+    case FunDef(name, args, body) =>
+      // add function itself as a local variable
+      val parState = state.addSymbol(name, state.symTable.size)
+      val map      = args.zipWithIndex.toMap
+      // TODO: possibly take 2nd look at this - parse body as chunk w/ custom proto
+      val funbody = processStmt(
+        Proto(
+          instructions = Nil,
+          constTable = Map.empty,
+          symTable = map, // parameters
+          upvalTable = Map.empty,
+          fnTable = Nil,
+          paramCnt = map.size, // param cnt
+          parent = parState    // store parent as well
+        ),
+        body
+      )
+        .addInstructions(RETURN(map.size))
+      // create closure instruction, and update state (local var + fn table)
+      val afterClosure = parState
+        .addFn(funbody)
+        .addInstructions(
+          CLOSURE(state.symTable.size, state.fnTable.size)
+            :: psuedoInstrs(funbody): _*
+        )
+      // add upvalues to parent function(s), in order of their index
+      funbody.upvalTable.toList
+        .sortBy(_._2)
+        .foldLeft(afterClosure):
+          case (st, (name, ind)) => // if upvalue not present, add to upvaltable
+            if st.symTable.contains(name) || st.upvalTable.contains(name)
+            then st
+            else st.addUpval(name, st.upvalTable.size)
+    case While(cond, body)                 => ???
+    case For(name, start, end, step, body) => ???
+    case Break => // sentinel value, to be modified by for and while case
+      state.addInstructions(JMP(-1))
+    case If(cond, body, elifs, elseBody) => ???
+    case Chunk(stmts)                    => stmts.foldLeft(state)(processStmt)
+    case Return(expr)                    => ???
+    case _                               => err("invalid statement")
 
 end CodeGen

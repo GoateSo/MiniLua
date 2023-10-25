@@ -1,3 +1,5 @@
+import pprint.Tree
+import compiler.CodeGen.flattenOp
 import compiler.*
 import utils.Parseutil
 
@@ -37,3 +39,31 @@ val p2 = Parser.program(Tokenizer.tokenize("""|local xs = {{1,2},{2,4}}
 
 Parseutil.asString(p2)
 Parseutil.asString(p)
+import TreeNode.*
+flattenOp("and", BinOp("and",
+    BinOp("and",
+        BinOp("+", Id("a"), Id("b")),
+        BinOp("+", Id("c"), Id("d"))
+    ),
+    BinOp("and",
+        BinOp("and", UnOp("-",LNum(1)), Id("f")),
+        BinOp("and", Id("g"), Id("h"))
+    )
+)).mkString("\n","\n","\n")
+
+
+val prog = Parser.expr(Tokenizer.tokenize("(a and a and a) + (b or b or b)"))._1.get
+
+val code = CodeGen.processExpr(
+    prog,
+    Proto(
+        Nil,
+        Map.empty,
+        Map("a" -> 0, "b" -> 1),
+        Map.empty,
+        List.empty,
+        0,
+        null
+    ),
+    2
+).instructions.zipWithIndex.map((a,b) => s"$b\t:$a").mkString("\n","\n","\n")

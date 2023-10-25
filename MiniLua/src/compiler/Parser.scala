@@ -47,49 +47,6 @@ binop ::= `+` | `-` | `*` | `/` | `^` | `%` | `..` |
     and | or
 unop ::= `-` | not | `#`
  */
-// exp binop/unop established vis a vis pratt parser
-/*
-operator precedence:
--  ^
--  not  - (unary)
--  *   /
--  +   -
--  ..
--  <   >   <=  >=  ~=  ==
--  and
--  or
- */
-enum TreeNode:
-  case BinOp(op: String, left: TreeNode, right: TreeNode)
-  case UnOp(op: String, right: TreeNode)
-  case TInd(tab: TreeNode, ind: TreeNode)
-  case VarDef(name: String, value: TreeNode)
-  case VarMut(name: String, value: TreeNode)
-  case FunDef(name: String, args: List[String], body: TreeNode)
-  case FunCall(name: String, args: List[TreeNode])
-  case While(cond: TreeNode, body: TreeNode)
-  case Break
-  case For(
-      name: String,
-      start: TreeNode,
-      end: TreeNode,
-      step: Option[TreeNode],
-      body: TreeNode
-  )
-  case If(
-      cond: TreeNode,
-      body: TreeNode,
-      elifs: List[(TreeNode, TreeNode)], // elseif blocks (possibly empty)
-      elseBody: Option[TreeNode]         // else block
-  )
-  case Chunk(stmts: List[TreeNode])
-  case LNum(value: Double)
-  case LBool(value: Boolean)
-  case LStr(value: String)
-  case LNil
-  case Id(name: String)
-  case Arr(fields: List[TreeNode])
-  case Return(expr: TreeNode)
 
 object Parser:
   import TreeNode.*
@@ -114,7 +71,7 @@ object Parser:
       if !peek(cur, p, i) then err(s"$msg: ${cur(i)}")
     else err(s"$msg: <eof>")
 
-  // table constructor
+  // table constructor: {<explist> seperate by ','}
   def table(cur: List[Token]): ParseResult =
     cur match
       case Token(l, SP("{")) :: rest =>
@@ -123,7 +80,7 @@ object Parser:
         (Some(Arr(fields)), rest2.tail)
       case _ => (None, cur)
 
-  // funcation arguments
+  // function arguments : either (<exprlist>), "str", or {tab_cons}
   def farg(cur: List[Token]): (Option[List[TreeNode]], List[Token]) =
     cur match
       case Token(l, SP("(")) :: rest =>
@@ -147,6 +104,7 @@ object Parser:
           case None     => (Some(Id(name)), rest)
       case _ => (None, cur)
 
+  // generic left associative op-seperated parsing
   private def tailGo(
       node: TreeNode,
       cur: List[Token],
@@ -161,6 +119,19 @@ object Parser:
           case other => (Some(node), other._2)
       case other => (Some(node), other)
 
+  /**
+   * helper to parse a list of patterns seperated by a set of seperators in a
+   * left-associative manner
+   *
+   * @param parser
+   *   parser for the pattern
+   * @param seps
+   *   set of seperators, usually operators
+   * @param cur
+   *   current token list
+   * @return
+   *   parse result
+   */
   private def repSep(
       parser: List[Token] => ParseResult,
       seps: Set[String]
@@ -170,7 +141,19 @@ object Parser:
     case (Some(lhs), rest) => tailGo(lhs, rest, seps, parser)
     case other             => other
 
-  def factor(cur: List[Token]): ParseResult =
+  // exp binop/unop established vis a vis pratt parser
+  /*
+  operator precedence:
+  -  ^
+  -  not  - (unary)
+  -  *   /
+  -  +   -
+  -  ..
+  -  <   >   <=  >=  ~=  ==
+  -  and
+  -  or
+   */
+  private def factor(cur: List[Token]): ParseResult =
     cur match
       case Nil                        => (None, Nil)
       case Token(_, ID(name)) :: rest => idExpr(cur)
@@ -186,8 +169,8 @@ object Parser:
       case Token(_, KW("false")) :: rest => (Some(LBool(false)), rest)
       case Token(_, SP("{")) :: rest     => table(cur)
       case _                             => (None, cur) // soft fail
-
-  def tabInd(cur: List[Token]): ParseResult =
+  // table indexing expression
+  private def tabInd(cur: List[Token]): ParseResult =
     def go(toks: List[Token], node: TreeNode): ParseResult =
       toks match
         case Token(_, SP("[")) :: rest =>
@@ -200,13 +183,13 @@ object Parser:
       case (Some(left), rem) => go(rem, left)
       case res               => res
 
-  def power(cur: List[Token]): ParseResult =
+  private def power(cur: List[Token]): ParseResult =
     tabInd(cur) match
       case (Some(left), Token(_, SP("^")) :: rest) =>
         rmap(BinOp("^", left, _))(power(rest))
       case other => other
 
-  def unop(cur: List[Token]): ParseResult =
+  private def unop(cur: List[Token]): ParseResult =
     cur match
       case Token(_, SP(op)) :: next if op == "-" || op == "#" =>
         rmap(UnOp(op, _))(unop(next))
@@ -220,7 +203,7 @@ object Parser:
   val expr   = repSep(and, Set("or")) // lowest precedence - general expr
 
   // parse seperated list, expect that opening sym already consumed
-  def sepList(
+  private def sepList(
       parser: List[Token] => ParseResult,
       seps: Set[String],
       term: String
@@ -236,42 +219,41 @@ object Parser:
       case other => (ret, other._2) // no more elems
 
   // should consume closing brace / paren, or error
-  def exprList(
+  private inline def exprList(
       cur: List[Token],
       ret: List[TreeNode] = Nil
-  ): (List[TreeNode], List[Token]) =
+  ) =
     sepList(expr, Set(","), ")")(cur, ret)
 
-  def fieldList(
+  private inline def fieldList(
       cur: List[Token],
       ret: List[TreeNode] = Nil
-  ): (List[TreeNode], List[Token]) =
+  ) =
     sepList(expr, Set(",", ";"), "}")(cur, ret)
 
   def stmtList(cur: List[Token]): (List[TreeNode], List[Token]) =
     cur match
-      case List(Token(_, Eof)) =>
-        (Nil, cur)
-      case Token(_, SP(";")) :: rest =>
-        stmtList(rest)
+      case List(Token(_, Eof))       => (Nil, cur)
+      case Token(_, SP(";")) :: rest => stmtList(rest)
       case _ =>
         statement(cur) match
-          case (Some(node), rest) =>
+          case (Some(node), rest) => // matched statement, keep matching
             val (nodes, rest2) = stmtList(rest)
             (node :: nodes, rest2)
-          case (None, rest) =>
+          case (None, rest) => // failed to match, terminate
             (Nil, rest)
 
   def chunk(cur: List[Token]): ParseResult =
     val (stmts, rest) = stmtList(cur)
-    println(
-      s"${summon[sourcecode.Line]}: stmts: $stmts | rest: $rest"
-    )
+    // println(
+    //   s"${summon[sourcecode.Line]}: stmts: $stmts | rest: $rest"
+    // )
     lastStat(rest) match
       case (Some(node), rest2) => (Some(Chunk(stmts :+ node)), rest2)
       case (None, rest2)       => (Some(Chunk(stmts)), rest2)
 
-  def lastStat(cur: List[Token]): ParseResult = cur match
+  // last statement of a program
+  private transparent inline def lastStat(cur: List[Token]) = cur match
     case Token(l, KW("return")) :: rest =>
       expr(rest) match
         case (Some(node), rest2) => (Some(Return(node)), rest2)
@@ -284,12 +266,8 @@ object Parser:
       case Token(_, ID(name)) :: rest => (Some(Id(name)), rest)
       case _                          => (None, cur)
   private def funDef(cur: List[Token]): ParseResult =
-    // expect(cur, _ == KW("local"), "`local` not in fundef!")
-    // expect(cur, _ == KW("function"), "`function` expected in fundef", 1)
-    // expect(cur, _.isInstanceOf[ID], "name expected in fundef", 2)
-    // expect(cur, _ == SP("("), "`(` expected in fundef", 3)
     cur match
-      case Token(_, KW("local"))
+      case Token(_, KW("local")) // should start w. [local function <name> (]
           :: Token(_, KW("function"))
           :: Token(l, ID(name))
           :: Token(pl, SP("(")) :: rest =>
@@ -306,7 +284,7 @@ object Parser:
 
   private def varDef(cur: List[Token]): ParseResult =
     cur match
-      case Token(_, KW("local"))
+      case Token(_, KW("local")) // should start w. [local <name> = ]
           :: Token(_, ID(name))
           :: Token(_, SP("=")) :: rest =>
         expr(rest) match
@@ -326,6 +304,7 @@ object Parser:
     case _ => err(s"expected `<name> =` at ${cur.head.l}")
 
   private def whileLoop(cur: List[Token]): ParseResult = cur match
+    // should start with while <expr> do <block> end
     case Token(l, KW("while")) :: rest =>
       expr(rest) match
         case (Some(cond), Token(ld, KW("do")) :: rem) =>
@@ -379,6 +358,7 @@ object Parser:
             err(s"expected condition after `elseif` $el")
       case _ => (ret, cur) // exit
 
+  // full if-{elseif}-[else]-end block
   private def ifBlock(cur: List[Token]): ParseResult =
     expr(cur) match
       case (Some(cond), Token(_, KW("then")) :: rest) =>
@@ -408,14 +388,14 @@ object Parser:
   //   for Id `=` exp `,` exp [`,` exp] do block end |
   //   local function Id funcbody |
   //   local Id [`=` Id]
-  def statement(cur: List[Token]): ParseResult = cur match
+  private def statement(cur: List[Token]): ParseResult = cur match
     case Token(_, KW("local")) :: rest =>
       rest match
         case Token(_, KW("function")) :: _ => funDef(cur)
         case _                             => varDef(cur)
-    case Token(l, KW("while")) :: rest => whileLoop(cur)
+    case Token(_, KW("while")) :: rest => whileLoop(cur)
     case Token(_, KW("for")) :: rest   => forLoop(cur)
-    case Token(l, KW("if")) :: rest    => ifBlock(rest)
+    case Token(_, KW("if")) :: rest    => ifBlock(rest)
     case Token(_, ID(name)) :: rest =>
       rest match
         case Token(_, SP("=")) :: _ => varMut(cur)
@@ -424,6 +404,7 @@ object Parser:
           idExpr(cur)
     case _ => (None, cur)
 
+  // just a chunk with added checks for EOF
   def program(cur: List[Token]): TreeNode =
     chunk(cur) match
       case (Some(x), Token(_, Eof) :: Nil) => x
