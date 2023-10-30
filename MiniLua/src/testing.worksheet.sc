@@ -1,4 +1,3 @@
-import pprint.Tree
 import compiler.CodeGen.flattenOp
 import compiler.*
 import utils.Parseutil
@@ -40,30 +39,40 @@ val p2 = Parser.program(Tokenizer.tokenize("""|local xs = {{1,2},{2,4}}
 Parseutil.asString(p2)
 Parseutil.asString(p)
 import TreeNode.*
-flattenOp("and", BinOp("and",
-    BinOp("and",
-        BinOp("+", Id("a"), Id("b")),
-        BinOp("+", Id("c"), Id("d"))
-    ),
-    BinOp("and",
-        BinOp("and", UnOp("-",LNum(1)), Id("f")),
-        BinOp("and", Id("g"), Id("h"))
+flattenOp(
+  "and",
+  BinOp(
+    "and",
+    BinOp("and", BinOp("+", Id("a"), Id("b")), BinOp("+", Id("c"), Id("d"))),
+    BinOp(
+      "and",
+      BinOp("and", UnOp("-", LNum(1)), Id("f")),
+      BinOp("and", Id("g"), Id("h"))
     )
-)).mkString("\n","\n","\n")
+  )
+).mkString("\n", "\n", "\n")
 
+val prog = Parser
+  .program(
+    Tokenizer.tokenize(
+      """for i = a,b do local x = 1 local y = 2 end"""
+    )
+  )
 
-val prog = Parser.expr(Tokenizer.tokenize("(a and a and a) + (b or b or b)"))._1.get
-
-val code = CodeGen.processExpr(
-    prog,
+val code = CodeGen
+  .processStmt(
     Proto(
-        Nil,
-        Map.empty,
-        Map("a" -> 0, "b" -> 1),
-        Map.empty,
-        List.empty,
-        0,
-        null
+      Nil,
+      Map.empty,
+      Map("a" -> 0, "b" -> 1, "c" -> 2),
+      Map.empty,
+      List.empty,
+      0,
+      null
     ),
-    2
-).instructions.zipWithIndex.map((a,b) => s"$b\t:$a").mkString("\n","\n","\n")
+    prog
+  )
+  .instructions
+  .zipWithIndex
+  .map((a, b) => s"$b\t:$a")
+  .mkString("\n", "\n", "\n")

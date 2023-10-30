@@ -69,6 +69,11 @@ object CodeGen:
       state: Proto,
       reg: Int
   ): (Proto, Int, Int) = tree match
+    case LBool(value) =>
+      val v = if value then 1 else 0
+      (state addInstructions LOADBOOL(reg, v, 0), reg, reg + 1)
+    case LNil =>
+      (state addInstructions LOADNIL(reg, 1), reg, reg + 1)
     case LNum(value) =>
       val (constInd, st2) = getConst(state, value)
       (st2, constInd, reg)
@@ -77,12 +82,12 @@ object CodeGen:
       flag match // if upvalue, prefix w/ getupval, otherwise dierectly use index
         case LOCAL => (st2, symInd, reg)
         case UPVAL =>
-          (st2.addInstructions(GETUPVAL(reg, symInd)), reg, reg + 1)
+          (st2 addInstructions GETUPVAL(reg, symInd), reg, reg + 1)
     case _ => // arbitrary expression
       (processExpr(tree, state, reg), reg, reg + 1)
 
   // processes a function call (name and args) into a list of instructions
-  private inline def processFunCall(
+  private inline def processFCall(
       name: String,
       args: List[TreeNode],
       state: Proto,
@@ -93,7 +98,41 @@ object CodeGen:
     // process the arguments: fold w/ state, instruction list, and current register
     val (nst, _) = args.foldLeft(init, regA + 1):
       case ((st, reg), arg) => (processExpr(arg, st, reg), reg + 1)
-    nst.addInstructions(CALL(regA, args.size + 1)) // call instruction
+    nst addInstructions CALL(regA, args.size + 1) // call instruction
+
+  // very simple impl of boolean event processing
+  // -2 for jumps on true, -1 for jumps on false
+  private def processBoolExpr(
+      tree: TreeNode,
+      state: Proto,
+      reg: Int,
+      jmpOn: Boolean = false
+  ): Proto = tree match
+    case BinOp(op, left, right) if op == "and" || op == "or" =>
+      // 0 => jump on false, 1 => jump on true
+      flattenOp(op, tree) match
+        // 2. join w/ jmp instructions as seperators
+        case rest :+ last =>
+          // process all but last subexpression, w/ special rules adding Test/Testset; add jmp(-1) at end of each instr
+          val flag = if op == "and" then 0 else 1
+          val res = rest.foldLeft(state):
+            case (st, sub) =>
+              sub match
+                case Id(name) if st.hasLocal(name) =>
+                  st.addInstructions(
+                    TESTSET(reg, st.symTable(name), flag),
+                    JMP(-1)
+                  )
+                case _ => // arbitrary expression, process and add test
+                  // TODO: figure out case for mixture of "and"s and "or"s
+                  processExpr(sub, st, reg).addInstructions(
+                    TEST(reg, flag),
+                    JMP(-1)
+                  )
+          // process last subexpression as normal
+          processExpr(last, res, reg)
+        case _ => err("impossible case")
+    case _ => err("internal err: invalid boolean expression")
 
   /**
    * parses an expression tree into a list of instructions in a given context
@@ -104,9 +143,10 @@ object CodeGen:
       register: Int
   ): Proto =
     tree match
-      case FunCall(name, args) => processFunCall(name, args, state, register)
+      case FunCall(name, args) => processFCall(name, args, state, register)
       case LNum(x)             => loadValue(tree, register, state)
       case Id(name)            => loadValue(tree, register, state)
+      // TODO: add other cases (LNil, LStr, array, etc.)
       case UnOp(op, right) =>
         val (st2, op1, _) = processOp(right, state, register)
         st2.addInstructions:
@@ -141,90 +181,69 @@ object CodeGen:
             )
           // logical operators: delay evaluation of RHS until after testing LHS
           case "and" | "or" =>
-            // 1. minimize sub-trees of same op (a and b and c -> and_all(a, b, c))
-            val opList = flattenOp(op, tree) match
-              // 2. join w/ jmp instructions as seperators
-              case rest :+ last =>
-                // process all but last subexpression, w/ special rules adding Test/Testset; add jmp(-1) at end of each instr
-                val flag = if op == "and" then 0 else 1
-                val res = rest.foldLeft(state):
-                  case (st, sub) =>
-                    sub match
-                      case Id(name) if st.hasLocal(name) =>
-                        st.addInstructions(
-                          TESTSET(register, st.symTable(name), flag),
-                          JMP(-1)
-                        )
-                      case _ => // arbitrary expression, process and add test
-                        // TODO: figure out case for mixture of "and"s and "or"s
-                        processExpr(sub, st, register).addInstructions(
-                          TEST(register, flag),
-                          JMP(-1)
-                        )
-                // process last subexpression as normal
-                processExpr(last, res, register)
-              case _ => err("impossible case")
+            val opList = processBoolExpr(tree, state, register)
             // 3. figure out jmp distances and replace placeholders
-            val len = opList.instructions.size
             opList
               .copy: // copy and replace instructions with correct jmp distances
-                opList.instructions.zipWithIndex.collect:
-                  case (JMP(-1), i) => JMP(len - i - 1)
+                opList.instructions.zipWithIndex.map:
+                  case (JMP(-1), i) => JMP(opList.instructions.size - i - 1)
                   case (other, i)   => other
-
           case _ => err(s"invalid binary operator $op in expression $tree")
-      // TODO: add other cases
       case _ => throw Exception(s"invalid expression $tree")
 
   // produce a list of psuedo-instructions (move/getupval) that indicate where the function's nth
   // upvalue is located, either as MOVE 0 X or GETUPVAL 0 X depending on whether it's local to the parent
   private inline def psuedoInstrs(fn: Proto): List[Inst] =
-    val list = fn.upvalTable.foldLeft(IndexedSeq.fill(fn.upvalTable.size)("")) {
+    val list = fn.upvalTable.foldLeft(IndexedSeq.fill(fn.upvalTable.size)("")):
       case (acc, (name, ind)) => acc.updated(ind, name)
-    }
     list.foldRight(List[Inst]()): (name, acc) =>
       val (flag, ind) = findUpval(name, fn.parent)
       flag match
         case UPVAL => GETUPVAL(0, ind) :: acc
         case LOCAL => MOVE(0, ind) :: acc
-
+  // variable assignment, either declaration or mutation
+  // translate the definition and add to symbol table
   private inline def varAssign(
       name: String,
       defn: TreeNode,
       register: Int,
       st: Proto
-  ): Proto =
-    // translate the definition and add to symbol table
-    loadValue(defn, register, st).addSymbol(name, register)
+  ): Proto = loadValue(defn, register, st).addSymbol(name, register)
+
+  private inline def mkClosure(
+      args: List[String],
+      body: TreeNode,
+      parent: Proto
+  ) = Proto(
+    instructions = Nil,
+    constTable = Map.empty,
+    symTable = args.zipWithIndex.toMap, // parameters
+    upvalTable = Map.empty,
+    fnTable = Nil,
+    paramCnt = args.size, // param cnt
+    parent = parent       // store parent as well
+  )
 
   def processStmt(
       state: Proto,
       tree: TreeNode
   ): Proto = tree match
+    case Chunk(stmts) => stmts.foldLeft(state)(processStmt)
     case VarDef(name, value) =>
       varAssign(name, value, state.symTable.size, state)
     case VarMut(name, value) =>
       varAssign(name, value, state.symTable(name), state)
     case FunCall(name, args) =>
-      processFunCall(name, args, state, state.symTable.size)
-    case FunDef(name, args, body) =>
+      processFCall(name, args, state, state.symTable.size)
+    case Break /*placeholder jmp*/ => state.addInstructions(JMP(-1))
+    case FunDef(name, args, body)  =>
       // add function itself as a local variable
       val parState = state.addSymbol(name, state.symTable.size)
-      val map      = args.zipWithIndex.toMap
       // TODO: possibly take 2nd look at this - parse body as chunk w/ custom proto
       val funbody = processStmt(
-        Proto(
-          instructions = Nil,
-          constTable = Map.empty,
-          symTable = map, // parameters
-          upvalTable = Map.empty,
-          fnTable = Nil,
-          paramCnt = map.size, // param cnt
-          parent = parState    // store parent as well
-        ),
+        mkClosure(args, body, parState),
         body
-      )
-        .addInstructions(RETURN(map.size))
+      ).addInstructions(RETURN(args.size))
       // create closure instruction, and update state (local var + fn table)
       val afterClosure = parState
         .addFn(funbody)
@@ -240,13 +259,84 @@ object CodeGen:
             if st.symTable.contains(name) || st.upvalTable.contains(name)
             then st
             else st.addUpval(name, st.upvalTable.size)
-    case While(cond, body)                 => ???
-    case For(name, start, end, step, body) => ???
-    case Break => // sentinel value, to be modified by for and while case
-      state.addInstructions(JMP(-1))
-    case If(cond, body, elifs, elseBody) => ???
-    case Chunk(stmts)                    => stmts.foldLeft(state)(processStmt)
-    case Return(expr)                    => ???
-    case _                               => err("invalid statement")
+    case While(cond, body) =>
+      // evaluate condition, add jump-if-false condition
+      // evaluate loop body, add unconditional jump to condition
+      // sub -1 => end of loop, sub -2 => start of loop
+      val preSize = state.instructions.size
+      val condCode = processExpr(cond, state, state.symTable.size)
+        .addInstructions(TEST(state.symTable.size, 0), JMP(-1))
+      val bodyCode = processStmt(condCode, body).addInstructions(JMP(-2))
+      bodyCode
+        .copy( // substitute all "jump to end" instructions w/ correct offset
+          instructions = bodyCode.instructions.zipWithIndex.map:
+            case (JMP(-1), i) => JMP(bodyCode.instructions.size - i - 1)
+            case (JMP(-2), i) => JMP(preSize - i - 1)
+            case (other, _)   => other
+          ,
+          symTable = state.symTable
+        )
+    case For(name, start, end, step, body) =>
+      // starting line and register -- for jumps
+      val baseReg   = state.symTable.size
+      val startLine = state.instructions.size + 2
+      // load start, end, and step, and the iterator variable
+      val h1 = loadValue(start, baseReg, state)
+      val h2 = loadValue(end, baseReg + 1, h1)
+      val h3 = loadValue(step, baseReg + 2, h2)
+        .addSymbol(name, baseReg + 3)
+      val st = processStmt(
+        h3.addInstructions(FORPREP(baseReg, -1)).addSymbol(name, baseReg + 3),
+        body
+      ).addInstructions(FORLOOP(baseReg, -1))
+      // substitute all "jump to end" and "jump to start" instructions w/ correct offset
+      st.copy(
+        // replace placeholders w/ correct offsets
+        // forprep goes to forloop instr
+        // jmp to end in case of break stmt
+        // forloop goes to instr below forprep
+        instructions = st.instructions.zipWithIndex.map:
+          case (FORPREP(x, -1), i) => FORPREP(x, st.instructions.size - i - 2)
+          case (JMP(-1), i)        => JMP(st.instructions.size - i - 1)
+          case (FORLOOP(x, -1), i) => FORLOOP(x, startLine - i + 1)
+          case (other, _)          => other
+        , // also restore the inital symtable
+        symTable = state.symTable
+      )
+    case If(cond, body, elifs, elseBody) =>
+      // TODO: complete this impl (esp with jump distances)
+      // possible other consideration, instead of immediately replacing with
+      // offsets, set the abs line number and work out offsets at a later stage
+      // (likewise with expressions and while loops)
+      val conds = (cond, body) :: elifs
+      val nst = conds.foldLeft(state):
+        case (st, (cond, body)) =>
+          // add in the expressions, with the if-statement test+jmp
+          val nst = processExpr(cond, st, st.symTable.size)
+            .addInstructions(TEST(st.symTable.size, 0), JMP(-1))
+          // jump statement to skip to either end or else block
+          // then clear out variables declared in the body
+          val nst2 = processStmt(nst, body)
+            .addInstructions(JMP(-2)) // jmp to end
+            .copy(symTable = st.symTable)
+          nst2.copy:
+            nst2.instructions.zipWithIndex.map:
+              case (JMP(-1), i) => JMP(nst2.instructions.size - i - 1)
+              case (other, _)   => other
+      val res = elseBody match
+        case Some(eb) => processStmt(nst, eb)
+        case _        => nst
+      res.copy: // substitute all "jump to end" instructions w/ correct offset
+        res.instructions.zipWithIndex.map:
+          case (JMP(-2), i) => JMP(res.instructions.size - i - 1)
+          case (other, _)   => other
+    case Return(expr) =>
+      expr match
+        case Id(name) => state addInstructions RETURN(state.symTable(name))
+        case _ =>
+          val reg = state.symTable.size
+          val nst = loadValue(expr, reg, state)
+          nst addInstructions RETURN(reg)
+    case _ => err("invalid statement")
 
 end CodeGen

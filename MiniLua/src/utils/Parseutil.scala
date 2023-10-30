@@ -17,9 +17,7 @@ object Parseutil:
       s"while ${asString(cond)} do${asString(body).indent(2)}end"
     case Break => "break"
     case For(name, start, end, step, body) =>
-      s"for $name=${asString(start)}, ${asString(end)}${step
-          .map(s => s", ${asString(s)}")
-          .getOrElse("")} do${asString(body).indent(2)}end"
+      s"for $name=${asString(start)}, ${asString(end)}, ${asString(step)} do${asString(body).indent(2)}end"
     case If(cond, body, elifs, elseBody) =>
       s"if ${asString(cond)} then${asString(body).indent(2)}${elifs
           .map(e => s"elseif ${asString(e._1)} then${asString(e._2).indent(2)}")

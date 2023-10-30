@@ -1,8 +1,8 @@
 package compiler
 
 /**
-  * AST treenodes, specified by grammer in <parser.scala>
-  */
+ * AST treenodes, specified by grammer in <parser.scala>
+ */
 enum TreeNode:
   case BinOp(op: String, left: TreeNode, right: TreeNode)
   case UnOp(op: String, right: TreeNode)
@@ -17,7 +17,7 @@ enum TreeNode:
       name: String,
       start: TreeNode,
       end: TreeNode,
-      step: Option[TreeNode],
+      step: TreeNode,
       body: TreeNode
   )
   case If(

@@ -318,6 +318,16 @@ object Parser:
     case _ =>
       err(s"expected `while` at ${cur.head.l}")
 
+  private inline def forBody(
+      start: TreeNode,
+      end: TreeNode,
+      step: TreeNode,
+      cur: List[Token]
+  ): ParseResult = chunk(cur) match
+    case (Some(body), Token(_, KW("end")) :: rest) =>
+      (Some(For("i", start, end, step, body)), rest)
+    case _ => err(s"malformed for loop body at ${cur.head.l}")
+
   private def forLoop(cur: List[Token]): ParseResult = cur match
     case Token(l, KW("for"))
         :: Token(_, ID(name))
@@ -325,13 +335,17 @@ object Parser:
       expr(rest) match
         case (Some(start), Token(_, SP(",")) :: rest2) =>
           expr(rest2) match
-            case (Some(end), Token(_, KW("do")) :: rest3) =>
-              chunk(rest3) match
-                case (Some(body), Token(_, KW("end")) :: rest4) =>
-                  (Some(For("i", start, end, None, body)), rest4)
-                case (None, _) =>
-                  err(s"expected body for loop defined at $l")
-                case _ => err(s"expected `end` after `for` body after $l")
+            case (Some(end), rest3) =>
+              rest3 match
+                case Token(_, SP(",")) :: rest4 =>
+                  expr(rest4) match
+                    case (Some(step), Token(_, KW("do")) :: rest5) =>
+                      forBody(start, end, step, rest5)
+                    case _ => err(s"bad step/ missing 'do' in loop at $l")
+                case Token(_, KW("do")) :: rest4 =>
+                  forBody(start, end, LNum(1), rest4)
+                case _ =>
+                  err(s"expected step or 'do' in for loop header after $l")
             case (None, _) =>
               err(s"error parsing ending value of `for` loop defined at $l")
             case _ => err(s"expected `do` after `,` at $l")
@@ -399,9 +413,7 @@ object Parser:
     case Token(_, ID(name)) :: rest =>
       rest match
         case Token(_, SP("=")) :: _ => varMut(cur)
-        case _ =>
-          println(s"funcall ${summon[sourcecode.Line]}")
-          idExpr(cur)
+        case _                      => idExpr(cur)
     case _ => (None, cur)
 
   // just a chunk with added checks for EOF
