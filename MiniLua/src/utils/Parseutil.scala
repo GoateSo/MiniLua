@@ -23,7 +23,6 @@ object Parseutil:
           .map(e => s"elseif ${asString(e._1)} then${asString(e._2).indent(2)}")
           .mkString("")}${elseBody.map(e => s"else${asString(e).indent(2)}").getOrElse("")}end"
     case Chunk(stmts) =>
-      println("a")
       s"${stmts.map(asString(_)).mkString("\n", "\n", "")}"
     // expression sub-nodes
     case BinOp(op, left, right) =>

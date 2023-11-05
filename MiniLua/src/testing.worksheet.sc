@@ -5,6 +5,8 @@ import utils.Parseutil
 val e2 = """
 |local x = 5 + foo(a,b,{1.2,453.12})
 |local lig = bar{1,2,3}
+|local xs = {1,2,3,4}
+|local y = xs[({1,2,3})[1]]
 |local logma = ooga"aaaaa"
 |local y = 1+2+a
 |local z = a and b or 3
@@ -32,6 +34,20 @@ val e2 = """
 val p = Parser.program(Tokenizer.tokenize(e2))
 println(Parseutil.asString(p))
 
+val proto = CodeGen.processStmt(
+  Proto(
+    Nil,
+    Map(),
+    Map(),
+    Map(),
+    List(),
+    0,
+    null
+  ),
+  p
+)
+println(proto)
+
 val p2 = Parser.program(Tokenizer.tokenize("""|local xs = {{1,2},{2,4}}
                                               |local y = xs[1*1*1/2][2]
                                               |""".stripMargin))
@@ -39,34 +55,21 @@ val p2 = Parser.program(Tokenizer.tokenize("""|local xs = {{1,2},{2,4}}
 Parseutil.asString(p2)
 Parseutil.asString(p)
 import TreeNode.*
-flattenOp(
-  "and",
-  BinOp(
-    "and",
-    BinOp("and", BinOp("+", Id("a"), Id("b")), BinOp("+", Id("c"), Id("d"))),
-    BinOp(
-      "and",
-      BinOp("and", UnOp("-", LNum(1)), Id("f")),
-      BinOp("and", Id("g"), Id("h"))
-    )
-  )
-).mkString("\n", "\n", "\n")
 
 val prog = Parser
   .program(
     Tokenizer.tokenize(
-      """for i = a,b do local x = 1 local y = 2 end"""
+      """local a = {1,2,3,4} local b = ({1,2})[1]"""
     )
   )
-
 val code = CodeGen
   .processStmt(
     Proto(
       Nil,
-      Map.empty,
-      Map("a" -> 0, "b" -> 1, "c" -> 2),
-      Map.empty,
-      List.empty,
+      Map(),
+      Map(),
+      Map(),
+      List(),
       0,
       null
     ),

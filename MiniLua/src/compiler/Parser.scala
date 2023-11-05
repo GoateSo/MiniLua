@@ -3,7 +3,6 @@ package compiler
 import Tokenizer.Token
 import Tokenizer.Location
 import TokenType.*
-// TODO: include table indexing expressions
 // parse a limited subset of lua
 // - no generic fors
 // - no tables (only array-like)
@@ -222,14 +221,12 @@ object Parser:
   private inline def exprList(
       cur: List[Token],
       ret: List[TreeNode] = Nil
-  ) =
-    sepList(expr, Set(","), ")")(cur, ret)
+  ) = sepList(expr, Set(","), ")")(cur, ret)
 
   private inline def fieldList(
       cur: List[Token],
       ret: List[TreeNode] = Nil
-  ) =
-    sepList(expr, Set(",", ";"), "}")(cur, ret)
+  ) = sepList(expr, Set(",", ";"), "}")(cur, ret)
 
   def stmtList(cur: List[Token]): (List[TreeNode], List[Token]) =
     cur match
@@ -421,6 +418,5 @@ object Parser:
     chunk(cur) match
       case (Some(x), Token(_, Eof) :: Nil) => x
       case other =>
-        println(other)
         err(s"expected <eof> after program, got [${other._2.mkString(", ")}]")
 end Parser

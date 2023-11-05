@@ -13,8 +13,23 @@ private object UFlag:
   val UPVAL: UpvalFlag = true
 import UFlag.*
 
+// TODO: possible changes
+// - dont pass existing instructions as part of param; only pass other state to limit iteration when subbing placeholder jmps
+// - change placeholder value for break and add checks that it's not present outisde loops
 object CodeGen:
-  private inline def getConst(st: Proto, value: Double): (Int, Proto) =
+  private inline def isConst(t: TreeNode) =
+    t.isInstanceOf[LNum | LStr | LBool | LNil.type]
+  private inline def toInt(v: Boolean) =
+    if v then 1 else 0
+  private inline def getLVal(t: TreeNode): LVal =
+    t match
+      case LNil     => LNil
+      case LNum(n)  => n
+      case LStr(s)  => s
+      case LBool(b) => b
+      case _        => err("invalid constant")
+
+  private inline def getConst(st: Proto, value: LVal): (Int, Proto) =
     val consts = st.constTable
     if consts.contains(value) then (consts(value), st)
     else
@@ -40,11 +55,17 @@ object CodeGen:
       val (level, symind) = findUpval(name, parent)
       (nInd, st.addUpval(name, nInd), UPVAL)
 
-  def flattenOp(op: String, root: TreeNode): List[TreeNode] =
+  private def flattenOp(op: String, root: TreeNode): List[TreeNode] =
     root match
       case BinOp(op2, left, right) if op == op2 =>
         flattenOp(op, left) ++ flattenOp(op, right)
       case _ => List(root)
+
+  private inline def endJmps(st: Proto, placeHolder: Int = -1): Proto =
+    st.copy:
+      st.instructions.zipWithIndex.map:
+        case (JMP(`placeHolder`), i) => JMP(st.instructions.size - i - 1)
+        case (other, i)              => other
 
   private inline def loadValue(
       tree: TreeNode,
@@ -52,6 +73,13 @@ object CodeGen:
       st: Proto
   ): Proto =
     tree match
+      case LNil =>
+        st.addInstructions(LOADNIL(register, 0))
+      case LBool(value) =>
+        st.addInstructions(LOADBOOL(register, toInt(value), 0))
+      case LStr(s) =>
+        val (constInd, st2) = getConst(st, s)
+        st2.addInstructions(LOADK(register, constInd))
       case LNum(n) =>
         val (constInd, st2) = getConst(st, n)
         st2.addInstructions(LOADK(register, constInd))
@@ -69,20 +97,19 @@ object CodeGen:
       state: Proto,
       reg: Int
   ): (Proto, Int, Int) = tree match
-    case LBool(value) =>
-      val v = if value then 1 else 0
-      (state addInstructions LOADBOOL(reg, v, 0), reg, reg + 1)
-    case LNil =>
-      (state addInstructions LOADNIL(reg, 1), reg, reg + 1)
-    case LNum(value) =>
-      val (constInd, st2) = getConst(state, value)
+    // TODO: flesh out processing of constants (esp new ones (nil, bool, str))
+    // explicitly put in constant table and get its index in the const table; doesn't use instruction
+    case _ if isConst(tree) =>
+      val (constInd, st2) = getConst(state, getLVal(tree))
       (st2, constInd, reg)
+    // tries to find in symtable, otherwise emit a getupval instruction
     case Id(name) =>
       val (symInd, st2, flag) = getSym(state, name)
       flag match // if upvalue, prefix w/ getupval, otherwise dierectly use index
         case LOCAL => (st2, symInd, reg)
         case UPVAL =>
           (st2 addInstructions GETUPVAL(reg, symInd), reg, reg + 1)
+    // eval as arbitrary expression if not a const/variable
     case _ => // arbitrary expression
       (processExpr(tree, state, reg), reg, reg + 1)
 
@@ -105,8 +132,7 @@ object CodeGen:
   private def processBoolExpr(
       tree: TreeNode,
       state: Proto,
-      reg: Int,
-      jmpOn: Boolean = false
+      reg: Int
   ): Proto = tree match
     case BinOp(op, left, right) if op == "and" || op == "or" =>
       // 0 => jump on false, 1 => jump on true
@@ -125,10 +151,8 @@ object CodeGen:
                   )
                 case _ => // arbitrary expression, process and add test
                   // TODO: figure out case for mixture of "and"s and "or"s
-                  processExpr(sub, st, reg).addInstructions(
-                    TEST(reg, flag),
-                    JMP(-1)
-                  )
+                  processExpr(sub, st, reg)
+                    .addInstructions(TEST(reg, flag), JMP(-1))
           // process last subexpression as normal
           processExpr(last, res, reg)
         case _ => err("impossible case")
@@ -144,9 +168,21 @@ object CodeGen:
   ): Proto =
     tree match
       case FunCall(name, args) => processFCall(name, args, state, register)
-      case LNum(x)             => loadValue(tree, register, state)
+      case c if isConst(c)     => loadValue(tree, register, state)
       case Id(name)            => loadValue(tree, register, state)
-      // TODO: add other cases (LNil, LStr, array, etc.)
+      case TInd(tab, ind) => 
+        val (st2, tLoc, _) = processOp(tab, state, register)
+        val (st3, iLoc, _) = processOp(ind, st2, register+1)
+        st3.addInstructions(GETTABLE(register, tLoc, iLoc))
+      case Arr(fields) => 
+        val st2 = state.addInstructions(NEWTABLE(register, fields.size, 0))
+        val (st3, _) = fields.foldLeft(st2, register+1):
+          case ((st, reg), value) =>
+            val (nst, op, _) = processOp(value, st, reg)
+            (nst.addInstructions(LOADK(reg, op)), reg+1)
+        st3.addInstructions(
+          SETLIST(register, fields.size, 1)
+        )
       case UnOp(op, right) =>
         val (st2, op1, _) = processOp(right, state, register)
         st2.addInstructions:
@@ -160,7 +196,11 @@ object CodeGen:
       case BinOp(op, left, right) =>
         op match
           // arith operators: process RHS and add instruction on end
-          case "+" | "-" | "*" | "/" | "%" | "^" | ".." =>
+          case ".." => // concat loads both operations explicitly
+            val st2 = processExpr(left, state, register)
+            val st3 = processExpr(right, st2, register + 1)
+            st3.addInstructions(CONCAT(register, register, register + 1))
+          case "+" | "-" | "*" | "/" | "%" | "^" =>
             val (st2, op1, reg1) = processOp(left, state, register)
             val (st3, op2, _)    = processOp(right, st2, reg1)
             st3.addInstructions(GenUtils.ops(op)(register, op1, op2))
@@ -183,11 +223,7 @@ object CodeGen:
           case "and" | "or" =>
             val opList = processBoolExpr(tree, state, register)
             // 3. figure out jmp distances and replace placeholders
-            opList
-              .copy: // copy and replace instructions with correct jmp distances
-                opList.instructions.zipWithIndex.map:
-                  case (JMP(-1), i) => JMP(opList.instructions.size - i - 1)
-                  case (other, i)   => other
+            endJmps(opList)
           case _ => err(s"invalid binary operator $op in expression $tree")
       case _ => throw Exception(s"invalid expression $tree")
 
@@ -304,10 +340,6 @@ object CodeGen:
         symTable = state.symTable
       )
     case If(cond, body, elifs, elseBody) =>
-      // TODO: complete this impl (esp with jump distances)
-      // possible other consideration, instead of immediately replacing with
-      // offsets, set the abs line number and work out offsets at a later stage
-      // (likewise with expressions and while loops)
       val conds = (cond, body) :: elifs
       val nst = conds.foldLeft(state):
         case (st, (cond, body)) =>
@@ -316,20 +348,16 @@ object CodeGen:
             .addInstructions(TEST(st.symTable.size, 0), JMP(-1))
           // jump statement to skip to either end or else block
           // then clear out variables declared in the body
-          val nst2 = processStmt(nst, body)
-            .addInstructions(JMP(-2)) // jmp to end
-            .copy(symTable = st.symTable)
-          nst2.copy:
-            nst2.instructions.zipWithIndex.map:
-              case (JMP(-1), i) => JMP(nst2.instructions.size - i - 1)
-              case (other, _)   => other
+          endJmps(
+            processStmt(nst, body)
+              .addInstructions(JMP(-2)) // jmp to end
+              .copy(symTable = st.symTable)
+          )
       val res = elseBody match
         case Some(eb) => processStmt(nst, eb)
         case _        => nst
-      res.copy: // substitute all "jump to end" instructions w/ correct offset
-        res.instructions.zipWithIndex.map:
-          case (JMP(-2), i) => JMP(res.instructions.size - i - 1)
-          case (other, _)   => other
+      // substitute all "jump to end" instructions w/ correct offset
+      endJmps(res, -2)
     case Return(expr) =>
       expr match
         case Id(name) => state addInstructions RETURN(state.symTable(name))

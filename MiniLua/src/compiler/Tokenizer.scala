@@ -62,17 +62,21 @@ object Tokenizer:
       if c == '"' && last != '\\' then (None, "", cval + c)
       else (Str, cval + c, "")
     case Special =>
-      if cval == "." && c == '.' then (None, "", "..")
-      else if cval == "<" && c == '=' then (None, "", "<=")
-      else if cval == ">" && c == '=' then (None, "", ">=")
-      else if cval == "=" && c == '=' then (None, "", "==")
-      else if cval == "~" && c == '=' then (None, "", "~=")
-      else if cval == "." && c.isDigit then (Number, cval + c, "")
-      else (asState(c), s"$c", cval)
+      cval match
+        case "." =>
+          c match // concat or number
+            case '.'            => (None, "", "..")
+            case d if d.isDigit => (Number, cval + c, "")
+            case _              => (asState(c), s"$c", cval)
+        case "<" | ">" | "=" | "~" => // comparison
+          if c == '=' then (None, "", cval + c)
+          else (asState(c), s"$c", cval)
+        case _ => (asState(c), s"$c", cval)
 
   val Keywords = Set[String](
     "and", "or", "not", "if", "then", "else", "elseif", "end", "while", "do",
-    "repeat", "until", "for", "in", "break", "function", "local", "return"
+    "repeat", "until", "for", "in", "break", "function", "local", "return",
+    "true", "false", "nil"
   )
 
   private def mkTok(
@@ -105,7 +109,6 @@ object Tokenizer:
         else mkTok(state, curval, curloc) :: tokens
       case c :: rest =>
         val Location(line, column) = curloc
-        // println(s"$state [$line, $column] $c (${c.toInt}) ($curval)")
         if c.isWhitespace && state != Str then
           val nloc = c match
             case '\n' => Location(line + 1, 0)
@@ -126,6 +129,7 @@ object Tokenizer:
             else mkTok(state, newVal, curloc) :: tokens
           val nloc = curloc.copy(column = column + newVal.length)
           m_tokenize(rest, nState, newCur, nloc, nTokens)
+
   def tokenize(s: String) =
     (Token(Location(-1, -1), TokenType.Eof)
       :: m_tokenize(s.toList, None, "", Location(0, 0), Nil)).reverse

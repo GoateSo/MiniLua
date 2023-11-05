@@ -35,5 +35,6 @@ enum Inst(code: Int):
   case RETURN(a: Int)                   extends Inst(30)
   case FORLOOP(a: Int, sBx: Int)        extends Inst(31)
   case FORPREP(a: Int, sBx: Int)        extends Inst(32)
+  case SETLIST(a: Int, b: Int, c: Int)  extends Inst(34)
   case CLOSE(a: Int)                    extends Inst(35)
   case CLOSURE(a: Int, bx: Int)         extends Inst(36)
