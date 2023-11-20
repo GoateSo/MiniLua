@@ -36,23 +36,11 @@ object CodeGen:
       val nInd = consts.size + 0x100
       (nInd, st.copy(constTable = consts + (value -> nInd)))
 
-  // finds the upvalue in the parent prototype, checking whether its local to that prototype or its an upval in the parent also
-  private inline def findUpval(name: String, par: Proto): (UpvalFlag, Int) =
-    if par == null then (UPVAL, -1)
-    // in parent symbol table: return that it's local, and that it's a local in the parent
-    else if par.symTable.contains(name) then (LOCAL, par.symTable(name))
-    // otherwise: check parent upvalue table
-    else if par.upvalTable.contains(name) then (UPVAL, par.upvalTable(name))
-    // non-present, add instead. TODO: check whether this works. as it stands, this MUST be coupled with an addUpval call in the parent
-    else (UPVAL, par.upvalTable.size)
-
   private inline def getSym(st: Proto, name: String): (Int, Proto, UpvalFlag) =
     if st.symTable.contains(name) then (st.symTable(name), st, LOCAL)
     else if st.upvalTable.contains(name) then (st.upvalTable(name), st, UPVAL)
     else // TODO: fix this dumb code
-      val nInd            = st.upvalTable.size
-      val parent          = st.parent
-      val (level, symind) = findUpval(name, parent)
+      val nInd = st.upvalTable.size
       (nInd, st.addUpval(name, nInd), UPVAL)
 
   private def flattenOp(op: String, root: TreeNode): List[TreeNode] =
@@ -170,16 +158,16 @@ object CodeGen:
       case FunCall(name, args) => processFCall(name, args, state, register)
       case c if isConst(c)     => loadValue(tree, register, state)
       case Id(name)            => loadValue(tree, register, state)
-      case TInd(tab, ind) => 
+      case TInd(tab, ind) =>
         val (st2, tLoc, _) = processOp(tab, state, register)
-        val (st3, iLoc, _) = processOp(ind, st2, register+1)
+        val (st3, iLoc, _) = processOp(ind, st2, register + 1)
         st3.addInstructions(GETTABLE(register, tLoc, iLoc))
-      case Arr(fields) => 
+      case Arr(fields) =>
         val st2 = state.addInstructions(NEWTABLE(register, fields.size, 0))
-        val (st3, _) = fields.foldLeft(st2, register+1):
+        val (st3, _) = fields.foldLeft(st2, register + 1):
           case ((st, reg), value) =>
             val (nst, op, _) = processOp(value, st, reg)
-            (nst.addInstructions(LOADK(reg, op)), reg+1)
+            (nst.addInstructions(LOADK(reg, op)), reg + 1)
         st3.addInstructions(
           SETLIST(register, fields.size, 1)
         )
@@ -226,6 +214,16 @@ object CodeGen:
             endJmps(opList)
           case _ => err(s"invalid binary operator $op in expression $tree")
       case _ => throw Exception(s"invalid expression $tree")
+
+  // finds the upvalue in the parent prototype, checking whether its local to that prototype or its an upval in the parent also
+  private inline def findUpval(name: String, par: Proto): (UpvalFlag, Int) =
+    if par == null then (UPVAL, -1)
+    // in parent symbol table: return that it's local, and that it's a local in the parent
+    else if par.symTable.contains(name) then (LOCAL, par.symTable(name))
+    // otherwise: check parent upvalue table
+    else if par.upvalTable.contains(name) then (UPVAL, par.upvalTable(name))
+    // non-present, add instead. TODO: check whether this works. as it stands, this MUST be coupled with an addUpval call in the parent
+    else (UPVAL, par.upvalTable.size)
 
   // produce a list of psuedo-instructions (move/getupval) that indicate where the function's nth
   // upvalue is located, either as MOVE 0 X or GETUPVAL 0 X depending on whether it's local to the parent
@@ -284,8 +282,8 @@ object CodeGen:
       val afterClosure = parState
         .addFn(funbody)
         .addInstructions(
-          CLOSURE(state.symTable.size, state.fnTable.size)
-            :: psuedoInstrs(funbody): _*
+          (CLOSURE(state.symTable.size, state.fnTable.size)
+            :: psuedoInstrs(funbody)): _*
         )
       // add upvalues to parent function(s), in order of their index
       funbody.upvalTable.toList
@@ -360,7 +358,12 @@ object CodeGen:
       endJmps(res, -2)
     case Return(expr) =>
       expr match
-        case Id(name) => state addInstructions RETURN(state.symTable(name))
+        case Id(name) =>
+          val reg              = state.symTable.size
+          val (ind, nst, flag) = getSym(state, name)
+          flag match
+            case LOCAL => nst.addInstructions(RETURN(ind))
+            case UPVAL => nst.addInstructions(GETUPVAL(reg, ind), RETURN(reg))
         case _ =>
           val reg = state.symTable.size
           val nst = loadValue(expr, reg, state)

@@ -1,3 +1,8 @@
+import java.nio.file.Files
+import java.io.BufferedReader
+import java.io.ByteArrayInputStream
+import java.io.File
+import compiler.Displayer
 import compiler.CodeGen.flattenOp
 import compiler.*
 import utils.Parseutil
@@ -59,7 +64,7 @@ import TreeNode.*
 val prog = Parser
   .program(
     Tokenizer.tokenize(
-      """local a = {1,2,3,4} local b = ({1,2})[1]"""
+      """local x = 1 local function f() local function g() local function h() return x end end end f()"""
     )
   )
 val code = CodeGen
@@ -75,7 +80,13 @@ val code = CodeGen
     ),
     prog
   )
-  .instructions
-  .zipWithIndex
-  .map((a, b) => s"$b\t:$a")
-  .mkString("\n", "\n", "\n")
+
+// .instructions
+// .zipWithIndex
+// .map((a, b) => s"$b\t:$a")
+// .mkString("\n", "\n", "\n")
+
+BytecodeWriter.writeToFile(proto, "test.luaout")
+// convert test.luaout into a ByteArraInputStream
+val byts = Files.readAllBytes(File("test.luaout").toPath()).toList
+Displayer.disp(byts)

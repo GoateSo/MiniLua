@@ -3,7 +3,7 @@ package compiler
 /**
  * datatypes to encode lua instructions
  */
-enum Inst(code: Int):
+enum Inst(val code: Int):
   case MOVE(a: Int, b: Int)             extends Inst(0)
   case LOADK(a: Int, bx: Int)           extends Inst(1)
   case LOADBOOL(a: Int, b: Int, c: Int) extends Inst(2)
