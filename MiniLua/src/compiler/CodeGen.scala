@@ -13,7 +13,7 @@ private object UFlag:
   val UPVAL: UpvalFlag = true
 import UFlag.*
 
-// TODO: possible changes
+// possible api changes
 // - dont pass existing instructions as part of param; only pass other state to limit iteration when subbing placeholder jmps
 // - change placeholder value for break and add checks that it's not present outisde loops
 object CodeGen:
@@ -39,7 +39,7 @@ object CodeGen:
   private inline def getSym(st: Proto, name: String): (Int, Proto, UpvalFlag) =
     if st.symTable.contains(name) then (st.symTable(name), st, LOCAL)
     else if st.upvalTable.contains(name) then (st.upvalTable(name), st, UPVAL)
-    else // TODO: fix this dumb code
+    else 
       val nInd = st.upvalTable.size
       (nInd, st.addUpval(name, nInd), UPVAL)
 
@@ -85,7 +85,6 @@ object CodeGen:
       state: Proto,
       reg: Int
   ): (Proto, Int, Int) = tree match
-    // TODO: flesh out processing of constants (esp new ones (nil, bool, str))
     // explicitly put in constant table and get its index in the const table; doesn't use instruction
     case _ if isConst(tree) =>
       val (constInd, st2) = getConst(state, getLVal(tree))
@@ -138,7 +137,6 @@ object CodeGen:
                     JMP(-1)
                   )
                 case _ => // arbitrary expression, process and add test
-                  // TODO: figure out case for mixture of "and"s and "or"s
                   processExpr(sub, st, reg)
                     .addInstructions(TEST(reg, flag), JMP(-1))
           // process last subexpression as normal
@@ -193,7 +191,6 @@ object CodeGen:
             val (st3, op2, _)    = processOp(right, st2, reg1)
             st3.addInstructions(GenUtils.ops(op)(register, op1, op2))
           // comparison: evalute RHS and then do a comparison + jmp
-          // TODO: note: use seperate implementation when it's in a if statement's condition
           case "~=" | "==" | "<" | ">" | "<=" | ">=" =>
             val (st2, op1, reg1) = processOp(left, state, register)
             val (st3, op2, _)    = processOp(right, st2, reg1)
@@ -222,7 +219,7 @@ object CodeGen:
     else if par.symTable.contains(name) then (LOCAL, par.symTable(name))
     // otherwise: check parent upvalue table
     else if par.upvalTable.contains(name) then (UPVAL, par.upvalTable(name))
-    // non-present, add instead. TODO: check whether this works. as it stands, this MUST be coupled with an addUpval call in the parent
+    // non-present, add instead. as it stands, this MUST be coupled with an addUpval call in the parent
     else (UPVAL, par.upvalTable.size)
 
   // produce a list of psuedo-instructions (move/getupval) that indicate where the function's nth
@@ -273,7 +270,7 @@ object CodeGen:
     case FunDef(name, args, body)  =>
       // add function itself as a local variable
       val parState = state.addSymbol(name, state.symTable.size)
-      // TODO: possibly take 2nd look at this - parse body as chunk w/ custom proto
+      // parse body as chunk w/ custom proto
       val funbody = processStmt(
         mkClosure(args, body, parState),
         body

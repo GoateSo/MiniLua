@@ -42,8 +42,6 @@ object BytecodeWriter:
   private inline def toInst(inline op: Int, a: Int, bx: Int): Int =
     (op & 0x3f) | ((a & 0xff) << 6) | ((bx & 0x3ffff) << 14)
 
-  // private inline def toOpCode(ist: Inst): Int = ist.code
-
   private inline def constBytes(c: Double): Array[Byte] =
     ByteBuffer
       .allocate(8)
@@ -65,10 +63,44 @@ object BytecodeWriter:
     private def writeInt(i: Int): Queue[Byte] =
       buf.enqueueAll(constBytes(i))
     private def writeInstrs(xs: List[Inst]): Queue[Byte] =
-      xs.foldLeft(buf)((buf, x) => buf.writeInt(x.code))
+      xs.foldLeft(buf)((buf, x) => buf.writeInt(x match
+        case MOVE(a, b) => toInst(x.code, a, b, 0)
+        case LOADK(a, bx) => toInst(x.code, a, bx)
+        case LOADBOOL(a, b, c) => toInst(x.code, a, b, c)
+        case LOADNIL(a, b) => toInst(x.code, a, b, 0)
+        case GETUPVAL(a, b) => toInst(x.code, a, b, 0)
+        case GETGLOBAL(a, bx) => toInst(x.code, a, bx)
+        case GETTABLE(a, b, c) => toInst(x.code, a, b, 0)
+        case SETGLOBAL(a, bx) => toInst(x.code, a, bx)
+        case SETUPVAL(a, b) => toInst(x.code, a, b, 0)
+        case SETTABLE(a, b, c) => toInst(x.code, a, b, c)
+        case NEWTABLE(a, b, c) => toInst(x.code, a, b, c)
+        case ADD(a, b, c) => toInst(x.code, a, b, c)
+        case SUB(a, b, c) => toInst(x.code, a, b, c)
+        case MUL(a, b, c) => toInst(x.code, a, b, c)
+        case DIV(a, b, c) => toInst(x.code, a, b, c)
+        case MOD(a, b, c) => toInst(x.code, a, b, c)
+        case POW(a, b, c) => toInst(x.code, a, b, c)
+        case UNM(a, b) => toInst(x.code, a, b, 0)
+        case NOT(a, b) =>  toInst(x.code, a, b, 0)
+        case LEN(a, b) =>  toInst(x.code, a, b, 0)
+        case CONCAT(a, b, c) =>  toInst(x.code, a, b, c)
+        case JMP(sBx) => toInst(x.code, 0, sBx)
+        case EQ(a, b, c) => toInst(x.code, a, b, c)
+        case LT(a, b, c) => toInst(x.code, a, b, c)
+        case LE(a, b, c) => toInst(x.code, a, b, c)
+        case TEST(a, c) => toInst(x.code, a, 0, c)
+        case TESTSET(a, b, c) => toInst(x.code, a, b, c)
+        case CALL(a, b) => toInst(x.code, a, b, 0)
+        case RETURN(a) => toInst(x.code, a, 0, 0)
+        case FORLOOP(a, sBx) => toInst(x.code, a, sBx)
+        case FORPREP(a, sBx) => toInst(x.code, a, sBx)
+        case SETLIST(a, b, c) => toInst(x.code, a, b, c)
+        case CLOSE(a) => toInst(x.code, a, 0, 0)
+        case CLOSURE(a, bx) => toInst(x.code, a, bx)
+      ))
 
     private def writeConsts(xs: List[LVal]): Queue[Byte] =
-      // TODO: constant write
       xs.foldLeft(buf)((buf, x) =>
         buf.enqueueAll(
           x match
