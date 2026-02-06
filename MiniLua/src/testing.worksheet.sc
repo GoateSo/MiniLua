@@ -8,13 +8,13 @@ import compiler.*
 import utils.Parseutil
 
 val e2 = """
-|local x = 5 + foo(a,b,{1.2,453.12})
-|local lig = bar{1,2,3}
-|local xs = {1,2,3,4}
-|local y = xs[({1,2,3})[1]]
-|local logma = ooga"aaaaa"
-|local y = 1+2+a
-|local z = a and b or 3
+|local v1 = 5 + foo(a,b,{1.2,453.12})
+|local v2 = bar{1,2,3}
+|local v3 = {1,2,3,4}
+|local v4 = xs[({1,2,3})[1]]
+|local str = bad"aaaaa"
+|local sum = 1+2+a
+|local result = a and b or 3
 |local function foo(a,b,c)
 |  local x = 1 .. "aaa"
 |  local y = 1+2
@@ -33,7 +33,7 @@ val e2 = """
 |else 
 | print("c") 
 |end
-|logma = 1
+|str = 1
 |foo()
 """.strip().stripMargin
 val p = Parser.program(Tokenizer.tokenize(e2))
