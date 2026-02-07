@@ -166,18 +166,19 @@ object CodeGen:
           case ((st, reg), value) =>
             val (nst, op, _) = processOp(value, st, reg)
             (nst.addInstructions(LOADK(reg, op)), reg + 1)
-        st3.addInstructions(
-          SETLIST(register, fields.size, 1)
-        )
+        if fields.length > 0 
+          then st3.addInstructions(SETLIST(register, fields.size, 1))
+          else st3
       case UnOp(op, right) =>
         val (st2, op1, _) = processOp(right, state, register)
         st2.addInstructions:
           op match
             case "-"   => UNM(register, op1)
             case "not" => NOT(register, op1)
+            case "#"   => LEN(register, op1)
             case _ =>
               err(
-                s"invalid unary operator $op in expression ${Parseutil.asString(tree)}"
+                s"invalid unary operator $op in expression $tree"
               )
       case BinOp(op, left, right) =>
         op match
@@ -198,8 +199,7 @@ object CodeGen:
               case "==" | "<" | "<=" => 1
               case _                 => 0
             st3.addInstructions(
-              GenUtils
-                .compares(op)(flag, op1, op2), // cmp and jump to load false
+              GenUtils.compares(op)(flag, op1, op2), // cmp and jump to load false
               JMP(1),                          // jump to load true instr
               LOADBOOL(register, 0, 1),        // load false and skip 1
               LOADBOOL(register, 1, 0)         // load true
@@ -264,6 +264,16 @@ object CodeGen:
       varAssign(name, value, state.symTable.size, state)
     case VarMut(name, value) =>
       varAssign(name, value, state.symTable(name), state)
+    case TableSet(tab, ind, value) =>
+      // evaluate the table expression, then the index
+      val baseReg = state.symTable.size
+      val (st2, tOp, reg2) = processOp(tab, state, baseReg)
+      val (st3, tReg, reg3) = if tOp < 0 
+          then (st2.addInstructions(LOADK(baseReg, tOp)), baseReg, baseReg + 1)
+          else (st2, tOp, reg2)
+      val (st4, iOp, reg4) = processOp(ind, st3, reg3)
+      val (st5, vOp, _) = processOp(value, st4, reg4)
+      st5.addInstructions(SETTABLE(tReg, iOp, vOp))
     case FunCall(name, args) =>
       processFCall(name, args, state, state.symTable.size)
     case Break /*placeholder jmp*/ => state.addInstructions(JMP(-1))

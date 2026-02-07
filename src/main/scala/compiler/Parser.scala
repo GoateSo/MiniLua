@@ -89,7 +89,7 @@ object Parser:
       case Token(l, STR(name)) :: rest => (Some(List(LStr(name))), rest)
       case Token(l, SP("{")) :: _ =>
         table(cur) match
-          case (Some(Arr(fields)), rest) => (Some(fields), rest)
+          case (Some(arr), rest) => (Some(List(arr)), rest)
           case _ => err(s"expected table after `{` at $l")
       case _ => (None, cur)
 
@@ -293,13 +293,6 @@ object Parser:
             + s"instead got `${cur.take(3).mkString(" ")}`"
         )
 
-  private def varMut(cur: List[Token]): ParseResult = cur match
-    case Token(_, ID(name)) :: Token(_, SP("=")) :: rest =>
-      expr(rest) match
-        case (Some(value), rest2) => (Some(VarMut(name, value)), rest2)
-        case (None, _)            => err(s"expected expression after `$name =`")
-    case _ => err(s"expected `<name> =` at ${cur.head.l}")
-
   private def whileLoop(cur: List[Token]): ParseResult = cur match
     // should start with while <expr> do <block> end
     case Token(l, KW("while")) :: rest =>
@@ -408,9 +401,22 @@ object Parser:
     case Token(_, KW("for")) :: rest   => forLoop(cur)
     case Token(_, KW("if")) :: rest    => ifBlock(rest)
     case Token(_, ID(name)) :: rest =>
-      rest match
-        case Token(_, SP("=")) :: _ => varMut(cur)
-        case _                      => idExpr(cur)
+      // Attempt to parse a variable (lvalue) or function call
+      // Reuse tabInd to handle chain of indexing: id[exp][exp]...
+      tabInd(cur) match
+        case (Some(lhs), Token(_, SP("=")) :: rest2) =>
+          // It is an assignment
+          expr(rest2) match
+            case (Some(rhs), rest3) =>
+              lhs match
+                case Id(n)      => (Some(VarMut(n, rhs)), rest3)
+                case TInd(t, i) => (Some(TableSet(t, i, rhs)), rest3)
+                case _          => err(s"invalid assignment target ${lhs}")
+            case _ => err("expected expression after `=`")
+        case (Some(lhs), rest2) =>
+          // Expression statement (function call)
+          (Some(lhs), rest2)
+        case _ => (None, cur)
     case _ => (None, cur)
 
   // just a chunk with added checks for EOF

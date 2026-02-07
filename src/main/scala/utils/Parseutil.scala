@@ -9,6 +9,8 @@ object Parseutil:
       s"local $name = ${asString(value)}"
     case VarMut(name, value) =>
       s"$name = ${asString(value)}"
+    case TableSet(tab, ind, value) =>
+      s"${asString(tab)}[${asString(ind)}] = ${asString(value)}"
     case FunDef(name, args, body) =>
       s"local function $name(${args.mkString(", ")}) ${asString(body).indent(2)}end"
     case FunCall(name, args) =>

@@ -63,22 +63,23 @@ object ByteOperations:
 
 object Displayer:
   import ByteOperations.*
+  import java.io.PrintStream
 
-  def decompile(bcStream: ByteArrayInputStream, indent: Int): Unit =
+  def decompile(bcStream: ByteArrayInputStream, indent: Int, out: PrintStream = System.out): Unit =
     val nup    = bcStream.read()
     val nparam = bcStream.read()
     val nreg   = bcStream.read()
-    print(" " * indent)
-    println(s"$nup upvalues, $nparam param, $nreg registers needed")
+    out.print(" " * indent)
+    out.println(s"$nup upvalues, $nparam param, $nreg registers needed")
     val ninst = bcStream.readInt
-    print(" " * indent)
-    println(s"$ninst Insts")
+    out.print(" " * indent)
+    out.println(s"$ninst Insts")
     for _ <- 1 to ninst do
-      print(" " * indent)
-      println(bcStream.readInstr)
+      out.print(" " * indent)
+      out.println(bcStream.readInstr)
     val nconst = bcStream.readInt
-    print(" " * indent)
-    println(s"$nconst constants")
+    out.print(" " * indent)
+    out.println(s"$nconst constants")
     for i <- 1 to nconst do
       val typ = bcStream.read()
       val typeString = typ match
@@ -93,15 +94,16 @@ object Displayer:
         case 4 =>
           val len = bcStream.readInt
           (1 to len) map (_ => bcStream.read) map (_.toChar) mkString ""
-      print(" " * indent)
-      println(s"${-i}: $typeString: $value")
+      out.print(" " * indent)
+      out.println(s"${-i}: $typeString: $value")
     val nfn = bcStream.readInt
-    print(" " * indent)
-    println(s"$nfn functions")
-    println()
-    for _ <- 1 to nfn do decompile(bcStream, indent + 1)
+    out.print(" " * indent)
+    out.println(s"$nfn functions")
+    out.println()
+    for _ <- 1 to nfn do decompile(bcStream, indent + 1, out)
 
-  def disp(bytecode: List[Byte]): Unit = decompile(
+  def disp(bytecode: List[Byte], out: PrintStream = System.out): Unit = decompile(
     ByteArrayInputStream(bytecode.toArray),
-    0
+    0,
+    out
   )

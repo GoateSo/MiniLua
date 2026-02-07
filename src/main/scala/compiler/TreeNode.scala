@@ -7,6 +7,7 @@ enum TreeNode:
   case BinOp(op: String, left: TreeNode, right: TreeNode)
   case UnOp(op: String, right: TreeNode)
   case TInd(tab: TreeNode, ind: TreeNode)
+  case TableSet(tab: TreeNode, ind: TreeNode, value: TreeNode)
   case VarDef(name: String, value: TreeNode)
   case VarMut(name: String, value: TreeNode)
   case FunDef(name: String, args: List[String], body: TreeNode)

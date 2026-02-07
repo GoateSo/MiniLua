@@ -70,7 +70,7 @@ object BytecodeWriter:
         case LOADNIL(a, b) => toInst(x.code, a, b, 0)
         case GETUPVAL(a, b) => toInst(x.code, a, b, 0)
         case GETGLOBAL(a, bx) => toInst(x.code, a, bx)
-        case GETTABLE(a, b, c) => toInst(x.code, a, b, 0)
+        case GETTABLE(a, b, c) => toInst(x.code, a, b, c)
         case SETGLOBAL(a, bx) => toInst(x.code, a, bx)
         case SETUPVAL(a, b) => toInst(x.code, a, b, 0)
         case SETTABLE(a, b, c) => toInst(x.code, a, b, c)
