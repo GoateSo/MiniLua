@@ -16,7 +16,7 @@ object GenUtils:
     "~=" -> EQ.apply,
     "==" -> EQ.apply,
     "<"  -> LT.apply,
-    ">"  -> LT.apply,
+    ">"  -> LE.apply,
     "<=" -> LE.apply,
-    ">=" -> LE.apply
+    ">=" -> LT.apply
   )

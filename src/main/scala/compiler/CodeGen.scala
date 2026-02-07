@@ -33,7 +33,7 @@ object CodeGen:
     val consts = st.constTable
     if consts.contains(value) then (consts(value), st)
     else
-      val nInd = consts.size + 0x100
+      val nInd = -consts.size-1
       (nInd, st.copy(constTable = consts + (value -> nInd)))
 
   private inline def getSym(st: Proto, name: String): (Int, Proto, UpvalFlag) =

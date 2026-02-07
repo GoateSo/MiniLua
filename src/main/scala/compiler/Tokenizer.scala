@@ -15,7 +15,7 @@ object Tokenizer:
     override def toString(): String = s"[$line:$column]"
 
   case class Token(l: Location, cont: TokenType):
-    override def toString(): String = s"$cont"
+    override def toString(): String = s"($l$cont)"
 
   private enum TState:
     case None, Ident, Integral, Number, Str, Special

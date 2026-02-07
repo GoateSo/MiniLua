@@ -3,6 +3,8 @@
 
 # Bloop
 .bsp
+.scala-build
+*.worksheet.sc
 
 # VS Code
 .vscode/
@@ -12,10 +14,7 @@
 .metals/
 metals.sbt
 
-# IDEA
-.idea
-.idea_modules
-/.worksheet/
-
 #output
 out/
+project/
+target/

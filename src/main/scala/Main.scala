@@ -19,6 +19,7 @@ object Main{
 
     BytecodeWriter.writeToFile(proto, output)
     if dispOut.value then
+      // println(proto)
       Displayer.disp(Files.readAllBytes(File(output).toPath()).toList)
   }
   def main(args: Array[String]): Unit = Parser(this).runOrExit(args)
