@@ -63,7 +63,7 @@ class ReaderWriterSuite extends FunSuite:
         |
         |""".stripMargin
 
-    assertEquals(normalizedOutput, expectedOutput)
+    assertNoDiff(normalizedOutput, expectedOutput)
   }
 
   test("BytecodeWriter and Displayer nested function") {
@@ -124,7 +124,7 @@ class ReaderWriterSuite extends FunSuite:
         |
         |""".stripMargin
 
-    assertEquals(normalizedOutput, expectedOutput)
+    assertNoDiff(normalizedOutput, expectedOutput)
   }
 
   test("BytecodeWriter toInst correctness for all instructions") {

@@ -31,14 +31,14 @@ class ParseutilSuite extends FunSuite:
 
   test("Parseutil.asString for control structures") {
     val whileLoop = While(LBool(true), Chunk(List(Id("foo"))))
-    assertEquals(Parseutil.asString(whileLoop), """while true do  
+    assertNoDiff(Parseutil.asString(whileLoop).toString(), """while true do  
       |  foo
       |end""".stripMargin)
 
     val forLoop = For("i", LNum(1.0), LNum(10.0), LNum(1.0), Chunk(List(Id("foo"))))
-    assertEquals(Parseutil.asString(forLoop), """for i=1.0, 10.0, 1.0 do  
+    assertNoDiff(Parseutil.asString(forLoop), """for i=1.0, 10.0, 1.0 do  
       |  foo
-      |end""".stripMargin)
+      |end""".stripMargin.toString())
 
     val ifStmt = If(
       Id("a"),
@@ -53,20 +53,20 @@ class ParseutilSuite extends FunSuite:
       |else  
       |  e
       |end""".stripMargin
-    assertEquals(Parseutil.asString(ifStmt), expectedIf)
+    assertNoDiff(Parseutil.asString(ifStmt), expectedIf)
   }
 
   test("Parseutil.asString for functions and arrays") {
     val funDef = FunDef("my_func", List("a", "b"), Chunk(List(Return(Id("a")))))
-    assertEquals(Parseutil.asString(funDef), """local function my_func(a, b)   
+    assertNoDiff(Parseutil.asString(funDef), """local function my_func(a, b)   
       |  return a
       |end""".stripMargin)
 
     val funCall = FunCall("print", List(LStr("hi"), Id("x")))
-    assertEquals(Parseutil.asString(funCall), "print(hi, x)")
+    assertNoDiff(Parseutil.asString(funCall), "print(hi, x)")
 
     val array = Arr(List(LNum(1.0), LStr("two")))
-    assertEquals(Parseutil.asString(array), "{1.0, two}")
+    assertNoDiff(Parseutil.asString(array), "{1.0, two}")
   }
 
   test("Parseutil.asString for complex chunks") {
@@ -74,7 +74,7 @@ class ParseutilSuite extends FunSuite:
       VarDef("a", LNum(1.0)),
       VarMut("a", BinOp("+", Id("a"), LNum(1.0)))
     ))
-    assertEquals(Parseutil.asString(chunk), """
+    assertNoDiff(Parseutil.asString(chunk), """
       |local a = 1.0
       |a = (a + 1.0)""".stripMargin)
   }

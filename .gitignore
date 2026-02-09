@@ -16,5 +16,6 @@ metals.sbt
 
 #output
 out/
-project/
+project/*
 target/
+!project/plugins.sbt
