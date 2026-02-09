@@ -227,7 +227,7 @@ class ParseSuite extends FunSuite:
   }
 
   test("parse comprehensive order of operations") {
-    val code = "local a = 2^3+5*5/2 < 5 and true or false"
+    val code = "local a = 2.5^.25+5*5/2 < 5 and true or false"
     val tokens = Tokenizer.tokenize(code)
     val tree = Parser.program(tokens)
     import TreeNode.*
@@ -243,7 +243,7 @@ class ParseSuite extends FunSuite:
                 "<",
                 BinOp(
                   "+",
-                  BinOp("^", LNum(2.0), LNum(3.0)),
+                  BinOp("^", LNum(2.5), LNum(0.25)),
                   BinOp("/", BinOp("*", LNum(5.0), LNum(5.0)), LNum(2.0))
                 ),
                 LNum(5.0)
@@ -276,7 +276,7 @@ class ParseSuite extends FunSuite:
   }
 
   test("parse table indexing") {
-    val tokens = Tokenizer.tokenize("local a = b[1]")
+    val tokens = Tokenizer.tokenize("	local a = b[1]")
     val tree = Parser.program(tokens)
     import TreeNode.*
     assertEquals(
@@ -355,6 +355,42 @@ class ParseSuite extends FunSuite:
     )
   }
 
+  test("parser throws on malformed expressions") {
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = {1, 2"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = 1+"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = 1*"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = 3/"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = 3^"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = 3^2-"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = ^3"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = (1+1"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = 1+1)"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = 1.1.1)"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("local a = 1.1.)"))
+    }
+  }
+
   test("parser throws on unclosed function arguments") {
     val tokens = Tokenizer.tokenize("my_func(a, b")
     intercept[Exception] {
@@ -383,38 +419,21 @@ class ParseSuite extends FunSuite:
     }
   }
 
-  test("parser throws on while loop missing do") {
-    val tokens = Tokenizer.tokenize("while true end")
+  test("parser throws on malformed while loop missing do") {
     intercept[Exception] {
-      Parser.program(tokens)
+      Parser.program(Tokenizer.tokenize("while true end"))
     }
-  }
-
-  test("parser throws on for loop missing do") {
-    val tokens = Tokenizer.tokenize("for i = 1, 10 end")
     intercept[Exception] {
-      Parser.program(tokens)
+      Parser.program(Tokenizer.tokenize("while do end"))
     }
-  }
-
-  test("parser throws on for loop with incomplete header") {
-    val tokens = Tokenizer.tokenize("for i = 1, do end")
     intercept[Exception] {
-      Parser.program(tokens)
+      Parser.program(Tokenizer.tokenize("while true do"))
     }
-  }
-
-  test("parser throws on if missing then") {
-    val tokens = Tokenizer.tokenize("if true end")
     intercept[Exception] {
-      Parser.program(tokens)
+      Parser.program(Tokenizer.tokenize("while do do end"))
     }
-  }
-
-  test("parser throws on if missing condition") {
-    val tokens = Tokenizer.tokenize("if then")
     intercept[Exception] {
-      Parser.program(tokens)
+      Parser.program(Tokenizer.tokenize("while true end end"))
     }
   }
 
@@ -439,47 +458,78 @@ class ParseSuite extends FunSuite:
     }
   }
 
-  test("parser throws on for loop missing =") {
-    val tokens = Tokenizer.tokenize("for i 1, 10 do end")
+  test("parser throws on malformed for loops") {
     intercept[Exception] {
-      Parser.program(tokens)
+      Parser.program(Tokenizer.tokenize("for i 1, 10 do end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i = 1, 10, do end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i = 1, 10, 1 end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i do end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i = 1 do end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i = 1,2,3,4 do end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i = 1, do end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i = 1, 10 end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i = 1, 10 do"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("for i = 1, 10, 1 do"))
     }
   }
 
-  test("parser throws on for loop bad step") {
-    val tokens = Tokenizer.tokenize("for i = 1, 10, do end")
+  test("parser throws on malformed if statement") {
     intercept[Exception] {
-      Parser.program(tokens)
+      Parser.program(Tokenizer.tokenize("if true then print(1) else print(2)"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then print(1)"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if then"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then elseif")) 
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then elseif true end")) 
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then elseif true then")) 
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then elseif true then print(1)"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then elseif true then print(1) else"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then elseif print(1) end"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then else print(1)"))
+    }
+    intercept[Exception] {
+      Parser.program(Tokenizer.tokenize("if true then else then print(1) end"))
     }
   }
 
-  test("parser throws on for loop missing do after step") {
-    val tokens = Tokenizer.tokenize("for i = 1, 10, 1 end")
-    intercept[Exception] {
-      Parser.program(tokens)
-    }
-  }
-
-  test("parser throws on while missing expression") {
-    val tokens = Tokenizer.tokenize("while do end")
-    intercept[Exception] {
-      Parser.program(tokens)
-    }
-  }
-
-  test("parser throws on if missing end after else") {
-    val tokens = Tokenizer.tokenize("if true then print(1) else print(2)")
-    intercept[Exception] {
-      Parser.program(tokens)
-    }
-  }
-
-  test("parser throws on if missing end after then") {
-    val tokens = Tokenizer.tokenize("if true then print(1)")
-    intercept[Exception] {
-      Parser.program(tokens)
-    }
-  }
 
   test("parser throws on var assignment missing expression") {
     val tokens = Tokenizer.tokenize("a =")

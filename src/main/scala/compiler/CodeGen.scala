@@ -232,6 +232,7 @@ object CodeGen:
       flag match
         case UPVAL => GETUPVAL(0, ind) :: acc
         case LOCAL => MOVE(0, ind) :: acc
+
   // variable assignment, either declaration or mutation
   // translate the definition and add to symbol table
   private inline def varAssign(
@@ -268,12 +269,9 @@ object CodeGen:
       // evaluate the table expression, then the index
       val baseReg = state.symTable.size
       val (st2, tOp, reg2) = processOp(tab, state, baseReg)
-      val (st3, tReg, reg3) = if tOp < 0 
-          then (st2.addInstructions(LOADK(baseReg, tOp)), baseReg, baseReg + 1)
-          else (st2, tOp, reg2)
-      val (st4, iOp, reg4) = processOp(ind, st3, reg3)
+      val (st4, iOp, reg4) = processOp(ind, st2, reg2)
       val (st5, vOp, _) = processOp(value, st4, reg4)
-      st5.addInstructions(SETTABLE(tReg, iOp, vOp))
+      st5.addInstructions(SETTABLE(tOp, iOp, vOp))
     case FunCall(name, args) =>
       processFCall(name, args, state, state.symTable.size)
     case Break /*placeholder jmp*/ => state.addInstructions(JMP(-1))

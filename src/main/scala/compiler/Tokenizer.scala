@@ -40,12 +40,7 @@ object Tokenizer:
       c: Char,
       cval: String
   ): (TState, String, String) = state match
-    case None =>
-      if c.isLetter || c == '_' then (Ident, cval + c, "")
-      else if c.isDigit then (Integral, cval + c, "")
-      else if c == '"' then (Str, cval + c, "")
-      else if isSpecial(c) then (Special, cval + c, "")
-      else (asState(c), s"$c", cval)
+    case None => (asState(c), s"$c", cval)
     case Ident =>
       if c.isLetterOrDigit || c == '_' then (Ident, cval + c, "")
       else (asState(c), s"$c", cval)

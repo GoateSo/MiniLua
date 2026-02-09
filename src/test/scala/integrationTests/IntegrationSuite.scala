@@ -94,6 +94,7 @@ class IntegrationSuite extends FunSuite:
 
   test("Advanced compiler pipeline integration test") {
     val source = """
+      local s = "a" .. "b"
       local t = { 10, 20, 30 }
       local idx = 1
       local val = t[idx]
@@ -104,7 +105,7 @@ class IntegrationSuite extends FunSuite:
         elseif idx == 3 then
           t[idx] = 999
         else
-          t[idx] = idx * 2
+          t[idx] = idx * -2^2/2%2-2+2
         end
         idx = idx + 1
       end
@@ -265,3 +266,5 @@ class IntegrationSuite extends FunSuite:
     val proto = CodeGen.processStmt(Proto(Nil, Map.empty, Map.empty, Map.empty, Nil, 0), ast)
     assert(proto.instructions.exists(_.isInstanceOf[LEN]))
   }
+
+  

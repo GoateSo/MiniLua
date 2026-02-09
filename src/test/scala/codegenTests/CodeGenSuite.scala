@@ -76,15 +76,16 @@ class CodeGenSuite extends FunSuite:
     assertEquals(result.symTable, Map("a" -> 0))
   }
 
-  test("codegen for loop") {
-    val tree = For("i", LNum(1.0), LNum(10.0), LNum(1.0), Chunk(Nil))
+  test("codegen for loop test") {
+    val tree = For("i", LNum(1.0), LNum(10.0), LNum(1.0), Chunk(List(Break)))
     val result = CodeGen.processStmt(emptyProto, tree)
     val expected = List(
       LOADK(0, -1),
       LOADK(1, -2),
       LOADK(2, -1),
-      FORPREP(0, 0),
-      FORLOOP(0, -1)
+      FORPREP(0, 1),
+      JMP(1),
+      FORLOOP(0, -2)
     )
     // Clear constants that have non-deterministic order
     val filteredConstTable = result.constTable.view.mapValues(_.sign).toMap
@@ -332,4 +333,52 @@ class CodeGenSuite extends FunSuite:
     
     // Ignore constant table values, just check instructions
     assertEquals(result.instructions, expected)
+  }
+
+  test("proto toString") {
+    val input = Chunk(List(VarDef("x",LNum(1.0)), VarDef("z",BinOp("and",Id("x"),LNum(2.0)))))
+    val expected = """[proto]
+                    |Parameter Count: 0
+                    |Instructions:
+                    |0	:LOADK(0,-1)
+                    |1	:TESTSET(1,0,0)
+                    |2	:JMP(1)
+                    |3	:LOADK(1,-2)
+                    |Constants:
+                    |-2	2.0
+                    |-1	1.0
+                    |Symbols:
+                    |0	x
+                    |1	z
+                    |Upvalues:
+                    |
+                    |Functions:
+                    |""".stripMargin
+    val result = CodeGen.processStmt(emptyProto, input)
+
+    assertNoDiff(result.toString, expected)
+  }
+
+  test("invalid statement / expr") {
+    val badExpr = Chunk(List(VarDef("x",LNum(1.0)), VarDef("z",BinOp("and",Id("x"),LNum(2.0)))))
+    val badStmt = BinOp("+", LNum(1.0), LNum(2.0))
+    
+    intercept[Exception] {
+      CodeGen.processExpr(badExpr, emptyProto, 0)
+    }
+    intercept[Exception] {
+      CodeGen.processStmt(emptyProto, badStmt)
+    }
+  }
+
+  test("invalid statement / expr") {
+    val badExpr = Chunk(List(VarDef("x",LNum(1.0)), VarDef("z",BinOp("and",Id("x"),LNum(2.0)))))
+    val badStmt = BinOp("+", LNum(1.0), LNum(2.0))
+    
+    intercept[Exception] {
+      CodeGen.processExpr(badExpr, emptyProto, 0)
+    }
+    intercept[Exception] {
+      CodeGen.processStmt(emptyProto, badStmt)
+    }
   }

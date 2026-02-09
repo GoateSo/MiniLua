@@ -51,6 +51,11 @@ object Parser:
   import TreeNode.*
 
   type ParseResult = (Option[TreeNode], List[Token])
+  type CertainParseResult = (TreeNode, List[Token])
+
+  extension (pr: CertainParseResult)
+    def toParseResult: ParseResult = (Some(pr._1), pr._2)
+
   inline def rmap(f: TreeNode => TreeNode)(res: ParseResult): ParseResult =
     res match
       case (Some(node), rest) => (Some(f(node)), rest)
@@ -63,7 +68,7 @@ object Parser:
   inline def expect(
       cur: List[Token],
       p: TokenType => Boolean,
-      msg: String = "unexpected token",
+      msg: String,
       i: Int = 0
   ): Unit =
     if cur.size > i then
@@ -71,13 +76,10 @@ object Parser:
     else err(s"$msg: <eof>")
 
   // table constructor: {<explist> seperate by ','}
-  def table(cur: List[Token]): ParseResult =
-    cur match
-      case Token(l, SP("{")) :: rest =>
-        val (fields, rest2) = fieldList(rest)
-        expect(rest2, _ == SP("}"), s"expected '}' to close '{' from $l")
-        (Some(Arr(fields)), rest2.tail)
-      case _ => (None, cur)
+  def table(cur: List[Token], l : Location): CertainParseResult =
+    val (fields, rest2) = fieldList(cur)
+    expect(rest2, _ == SP("}"), s"expected '}' to close '{' from $l")
+    (Arr(fields), rest2.tail)
 
   // function arguments : either (<exprlist>), "str", or {tab_cons}
   def farg(cur: List[Token]): (Option[List[TreeNode]], List[Token]) =
@@ -87,21 +89,17 @@ object Parser:
           case (args, Token(_, SP(")")) :: rest2) => (Some(args), rest2)
           case _ => err(s"expected ')' to close '(' from $l")
       case Token(l, STR(name)) :: rest => (Some(List(LStr(name))), rest)
-      case Token(l, SP("{")) :: _ =>
-        table(cur) match
-          case (Some(arr), rest) => (Some(List(arr)), rest)
-          case _ => err(s"expected table after `{` at $l")
+      case Token(l, SP("{")) :: rest =>
+        table(rest, l) match
+          case (arr, rest2) => (Some(List(arr)), rest2)
       case _ => (None, cur)
 
   // factor that starts with an id (either a function call or an id)
-  def idExpr(cur: List[Token]): ParseResult =
-    cur match
-      case Token(_, ID(name)) :: rest =>
-        val (args, rest2) = farg(rest)
-        args match
-          case Some(as) => (Some(FunCall(name, as)), rest2)
-          case None     => (Some(Id(name)), rest)
-      case _ => (None, cur)
+  def idExpr(name: String, cur: List[Token]): CertainParseResult =
+    val (args, rest) = farg(cur)
+    args match
+      case Some(as) => (FunCall(name, as), rest)
+      case None     => (Id(name), cur)
 
   // generic left associative op-seperated parsing
   private def tailGo(
@@ -109,14 +107,15 @@ object Parser:
       cur: List[Token],
       ops: Set[String],
       parser: List[Token] => ParseResult
-  ): (Option[TreeNode], List[Token]) =
+  ): CertainParseResult =
     cur match
       case Token(_, op) :: rest if ops.contains(op.content) =>
         parser(rest) match
           case (Some(right), rest2) =>
             tailGo(BinOp(op.content, node, right), rest2, ops, parser)
-          case other => (Some(node), other._2)
-      case other => (Some(node), other)
+          case other => (node, cur)
+      case other => 
+        (node, other)
 
   /**
    * helper to parse a list of patterns seperated by a set of seperators in a
@@ -137,7 +136,7 @@ object Parser:
   )(
       cur: List[Token]
   ): ParseResult = parser(cur) match
-    case (Some(lhs), rest) => tailGo(lhs, rest, seps, parser)
+    case (Some(lhs), rest) => tailGo(lhs, rest, seps, parser).toParseResult
     case other             => other
 
   // exp binop/unop established vis a vis pratt parser
@@ -155,7 +154,7 @@ object Parser:
   private def factor(cur: List[Token]): ParseResult =
     cur match
       case Nil                        => (None, Nil)
-      case Token(_, ID(name)) :: rest => idExpr(cur)
+      case Token(_, ID(name)) :: rest => idExpr(name, rest).toParseResult
       case Token(l, SP("(")) :: rest =>
         val (exp, rest2) = expr(rest)
         expect(rest2, _ == SP(")"), s"expected ')' to close '(' from $l")
@@ -166,7 +165,7 @@ object Parser:
       case Token(_, KW("nil")) :: rest   => (Some(LNil), rest)
       case Token(_, KW("true")) :: rest  => (Some(LBool(true)), rest)
       case Token(_, KW("false")) :: rest => (Some(LBool(false)), rest)
-      case Token(_, SP("{")) :: rest     => table(cur)
+      case Token(l, SP("{")) :: rest     => table(rest, l).toParseResult
       case _                             => (None, cur) // soft fail
   // table indexing expression
   private def tabInd(cur: List[Token]): ParseResult =
@@ -185,7 +184,7 @@ object Parser:
   private def power(cur: List[Token]): ParseResult =
     tabInd(cur) match
       case (Some(left), Token(_, SP("^")) :: rest) =>
-        rmap(BinOp("^", left, _))(power(rest))
+        rmap(BinOp("^", left, _))(unop(rest))
       case other => other
 
   private def unop(cur: List[Token]): ParseResult =
@@ -240,14 +239,11 @@ object Parser:
           case (None, rest) => // failed to match, terminate
             (Nil, rest)
 
-  def chunk(cur: List[Token]): ParseResult =
+  def chunk(cur: List[Token]): CertainParseResult =
     val (stmts, rest) = stmtList(cur)
-    // println(
-    //   s"${summon[sourcecode.Line]}: stmts: $stmts | rest: $rest"
-    // )
     lastStat(rest) match
-      case (Some(node), rest2) => (Some(Chunk(stmts :+ node)), rest2)
-      case (None, rest2)       => (Some(Chunk(stmts)), rest2)
+      case (Some(node), rest2) => (Chunk(stmts :+ node), rest2)
+      case (None, rest2)       => (Chunk(stmts), rest2)
 
   // last statement of a program
   private transparent inline def lastStat(cur: List[Token]) = cur match
@@ -272,10 +268,9 @@ object Parser:
         expect(rest2, _ == SP(")"), s"expected ')' to close '(' from $pl")
         val argList = args.map(_.asInstanceOf[Id].name)
         val (body, rem) = chunk(rest2.tail) match
-          case (Some(body), rem) =>
+          case (body, rem) =>
             expect(rem, _ == KW("end"), s"expected `end` after function at $l")
             (body, rem.tail)
-          case (None, _) => err(s"expected body for function `$name` ($l)")
         (Some(FunDef(name, argList, body)), rem)
       case _ => err(s"expected `local function <name>` at ${cur.head.l}}")
 
@@ -286,39 +281,34 @@ object Parser:
           :: Token(_, SP("=")) :: rest =>
         expr(rest) match
           case (Some(value), rest2) => (Some(VarDef(name, value)), rest2)
-          case (None, _) => err(s"expected expression after `$name =`")
+          case (None, rest) => err(s"expected expression after `$name =`")
       case _ =>
         err(
           s"expected `local <name> =` at ${cur.head.l}, "
             + s"instead got `${cur.take(3).mkString(" ")}`"
         )
 
-  private def whileLoop(cur: List[Token]): ParseResult = cur match
-    // should start with while <expr> do <block> end
-    case Token(l, KW("while")) :: rest =>
-      expr(rest) match
-        case (Some(cond), Token(ld, KW("do")) :: rem) =>
-          chunk(rem) match
-            case (Some(body), Token(le, KW("end")) :: rem2) =>
-              (Some(While(cond, body)), rem2)
-            case (None, _) => err(s"expected body after `do` at ${rem.head.l}")
-            case _         => err(s"expected `end` after while body at $l")
-        case (None, _) => err(s"expected expression after `while` at $l")
-        case _         => err(s"expected `do` after `while` at $l")
-    case _ =>
-      err(s"expected `while` at ${cur.head.l}")
+  private def whileLoop(cur: List[Token], l: Location): CertainParseResult = 
+    // should start with <expr> do <block> end
+    expr(cur) match
+      case (Some(cond), Token(ld, KW("do")) :: rem) =>
+        chunk(rem) match
+          case (body, Token(le, KW("end")) :: rem2) => (While(cond, body), rem2)
+          case _         => err(s"expected `end` after while body at $l")
+      case (None, _) => err(s"expected expression after `while` at $l")
+      case _         => err(s"expected `do` after `while` at $l")
 
   private inline def forBody(
       start: TreeNode,
       end: TreeNode,
       step: TreeNode,
       cur: List[Token]
-  ): ParseResult = chunk(cur) match
-    case (Some(body), Token(_, KW("end")) :: rest) =>
-      (Some(For("i", start, end, step, body)), rest)
+  ): CertainParseResult = chunk(cur) match
+    case (body, Token(_, KW("end")) :: rest) =>
+      (For("i", start, end, step, body), rest)
     case _ => err(s"malformed for loop body at ${cur.head.l}")
 
-  private def forLoop(cur: List[Token]): ParseResult = cur match
+  private def forLoop(cur: List[Token]): CertainParseResult = cur match
     case Token(l, KW("for"))
         :: Token(_, ID(name))
         :: Token(_, SP("=")) :: rest =>
@@ -351,11 +341,8 @@ object Parser:
       case Token(el, KW("elseif")) :: rest =>
         expr(rest) match
           case (Some(cond), Token(tl, KW("then")) :: rest2) =>
-            chunk(rest2) match
-              case (Some(body), rest3) =>
-                elseifs(rest3, (cond, body) :: ret)
-              case (None, _) =>
-                err(s"expected body after `then` $tl")
+            val (body, rest3) = chunk(rest2)
+            elseifs(rest3, (cond, body) :: ret)
           case (Some(_), rest2) =>
             err(s"expected `then` after `elseif` $el")
           case (None, _) =>
@@ -366,21 +353,18 @@ object Parser:
   private def ifBlock(cur: List[Token]): ParseResult =
     expr(cur) match
       case (Some(cond), Token(_, KW("then")) :: rest) =>
-        chunk(rest) match
-          case (Some(body), rest2) =>
-            val (elifs, rest3) = elseifs(rest2)
-            val (elseBlock, rem) = rest3 match
-              case Token(_, KW("else")) :: rem =>
-                chunk(rem) match
-                  case (Some(node), Token(_, KW("end")) :: rest) =>
-                    (Some(node), rest)
-                  case (_, r) =>
-                    err(s"expected else body/end after ${r.head.l}")
-              case Token(_, KW("end")) :: rem => (None, rem)
-              case _ => err(s"expected `else` or `end` ifs and elseifs")
-            (Some(If(cond, body, elifs, elseBlock)), rem)
-          case (None, _) =>
-            err(s"expected body after `then` after ${cur.head.l}")
+        val (body, rest2) = chunk(rest)
+        val (elifs, rest3) = elseifs(rest2)
+        val (elseBlock, rem) = rest3 match
+          case Token(_, KW("else")) :: rem =>
+            chunk(rem) match
+              case (node, Token(_, KW("end")) :: rest) =>
+                (Some(node), rest)
+              case (_, r) =>
+                err(s"expected else body/end after ${r.head.l}")
+          case Token(_, KW("end")) :: rem => (None, rem)
+          case _ => err(s"expected `else` or `end` ifs and elseifs")
+        (Some(If(cond, body, elifs, elseBlock)), rem)
       case (Some(_), rest) =>
         err(s"expected `then` after if after ${cur.head.l}")
       case (None, _) => err(s"expected expression after if after ${cur.head.l}")
@@ -397,8 +381,8 @@ object Parser:
       rest match
         case Token(_, KW("function")) :: _ => funDef(cur)
         case _                             => varDef(cur)
-    case Token(_, KW("while")) :: rest => whileLoop(cur)
-    case Token(_, KW("for")) :: rest   => forLoop(cur)
+    case Token(l, KW("while")) :: rest => whileLoop(rest, l).toParseResult
+    case Token(_, KW("for")) :: rest   => forLoop(cur).toParseResult
     case Token(_, KW("if")) :: rest    => ifBlock(rest)
     case Token(_, ID(name)) :: rest =>
       // Attempt to parse a variable (lvalue) or function call
@@ -422,7 +406,7 @@ object Parser:
   // just a chunk with added checks for EOF
   def program(cur: List[Token]): TreeNode =
     chunk(cur) match
-      case (Some(x), Token(_, Eof) :: Nil) => x
+      case (x, Token(_, Eof) :: Nil) => x
       case other =>
         err(s"expected <eof> after program, got [${other._2.mkString(", ")}]")
 end Parser

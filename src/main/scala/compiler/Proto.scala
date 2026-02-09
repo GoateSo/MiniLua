@@ -23,12 +23,8 @@ final case class Proto(
     this.copy(symTable = symTable + (name -> ind))
   def addUpval(name: String, ind: Int): Proto =
     this.copy(upvalTable = upvalTable + (name -> ind))
-  def setParent(p: Proto): Proto =
-    this.copy(parent = p)
   def hasLocal(name: String): Boolean =
     symTable.contains(name)
-  def hasUpval(name: String): Boolean =
-    upvalTable.contains(name)
   override def toString(): String =
     val instrs =
       s"Instructions:\n${instructions.zipWithIndex.map((a, b) => s"$b\t:$a").mkString("\n")}"

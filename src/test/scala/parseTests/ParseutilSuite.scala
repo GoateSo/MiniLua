@@ -78,3 +78,13 @@ class ParseutilSuite extends FunSuite:
       |local a = 1.0
       |a = (a + 1.0)""".stripMargin)
   }
+
+  test("Parseutil.asString for table assignment") {
+    val chunk = Chunk(List(
+      VarDef("a", Arr(List(LNum(1.0)))),
+      TableSet(Id("a"), LNum(1.0), BinOp("+", LNum(2.0), LNum(1.0)))
+    ))
+    assertNoDiff(Parseutil.asString(chunk), """
+      |local a = {1.0}
+      |a[1.0] = (2.0 + 1.0)""".stripMargin)
+  }
